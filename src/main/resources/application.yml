@@ -32,3 +32,26 @@ management:
 jwt:
   secret: moniq-secret-key-change-later
   expiration: 86400000
+
+# ============ JWT ============
+app:
+  jwt:
+    issuer: moniq
+    exp-minutes: 60
+    secret: ${JWT_SECRET}
+  # Where to redirect after OAuth2 success with token
+  auth:
+    frontend-callback: ${FRONTEND_URL}/auth/callback
+
+  # ============ OAuth2 Google ============
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID}
+            client-secret: ${GOOGLE_CLIENT__SECRET}
+            scope:
+            - openid
+            - profile
+            - email

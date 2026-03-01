@@ -1,32 +1,50 @@
 package com.moniq.api.security;
 
+import com.moniq.api.oauth.OAuth2SuccessHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
-import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
-@EnableWebSecurity
 public class SecurityConfig {
 
-    @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http
-            // For MVP APIs, disable CSRF (we’ll re-enable properly when UI + JWT is ready)
-            .csrf(csrf -> csrf.disable())
+  @Bean
+  public PasswordEncoder passwordEncoder() {
+    return new BCryptPasswordEncoder();
+  }
 
-            // Allow health + ping without auth, protect everything else
-            .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/ping", "/actuator/health", "/actuator/info").permitAll()
-                .anyRequest().authenticated()
-            )
+  @Bean
+  public SecurityFilterChain filterChain(
+      HttpSecurity http,
+      JwtService jwtService,
+      OAuth2SuccessHandler oAuth2SuccessHandler
+  ) throws Exception {
 
-            // Disable default form login redirect
-            .httpBasic(Customizer.withDefaults())
-            .formLogin(form -> form.disable());
+    http
+        .csrf(csrf -> csrf.disable())
+        .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+        .authorizeHttpRequests(auth -> auth
+            .requestMatchers("/ping").permitAll()
+            .requestMatchers("/auth/**").permitAll()
+            .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
+            .requestMatchers("/actuator/health","/actuator/info").permitAll()
+            .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+            .anyRequest().authenticated()
+        )
+        .oauth2Login(oauth -> oauth
+            .successHandler(oAuth2SuccessHandler)
+        )
+        .httpBasic(Customizer.withDefaults());
 
-        return http.build();
-    }
+    http.addFilterBefore(new JwtAuthFilter(jwtService), UsernamePasswordAuthenticationFilter.class);
+
+    return http.build();
+  }
 }
