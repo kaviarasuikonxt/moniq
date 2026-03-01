@@ -1,6 +1,7 @@
 package com.moniq.api.security;
 
 import com.moniq.api.oauth.OAuth2SuccessHandler;
+import com.moniq.api.security.JwtAuthFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;

@@ -50,10 +50,13 @@ public class JwtService {
         .parseSignedClaims(token)
         .getPayload();
 
+    @SuppressWarnings("unchecked")
+    Set<String> roles = (Set<String>) claims.get("roles", Set.class);
+
     return new JwtClaims(
         UUID.fromString(claims.getSubject()),
         claims.get("email", String.class),
-        claims.get("roles", Set.class)
+        roles
     );
   }
 
