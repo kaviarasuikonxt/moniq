@@ -2,7 +2,7 @@ package com.moniq.api.oauth;
 
 import com.moniq.api.auth.AuthProvider;
 import com.moniq.api.auth.UserEntity;
-import com.moniq.api.auth.UserRepository;
+import com.moniq.api.repository.UserRepository;
 import com.moniq.api.security.JwtService;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
