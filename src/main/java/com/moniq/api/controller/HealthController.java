@@ -1,4 +1,4 @@
-package com.housemind.api.controller;
+package com.moniq.api.controller;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;

@@ -1,4 +1,4 @@
-package com.housemind.api.security;
+package com.moniq.api.security;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

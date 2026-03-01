@@ -3,7 +3,7 @@ server:
 
 spring:
   application:
-    name: housemind-api
+    name: moniq-api
 
   datasource:
     url: jdbc:postgresql://localhost:5432/moniq
@@ -30,5 +30,5 @@ management:
         include: health,info
 
 jwt:
-  secret: housemind-secret-key-change-later
+  secret: moniq-secret-key-change-later
   expiration: 86400000

@@ -1,4 +1,4 @@
-package com.housemind.api.model;
+package com.moniq.api.model;
 
 import jakarta.persistence.*;
 import lombok.*;

@@ -1,4 +1,4 @@
-package com.housemind.api;
+package com.moniq.api;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -9,7 +9,7 @@ import org.springframework.boot.test.context.SpringBootTest;
         "spring.datasource.driver-class-name=org.h2.Driver"
 })
 
-class HousemindApiApplicationTests {
+class MoniqApiApplicationTests {
 
 	@Test
 	void contextLoads() {
