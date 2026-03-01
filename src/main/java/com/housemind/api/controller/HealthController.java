@@ -8,6 +8,6 @@ public class HealthController {
 
     @GetMapping("/ping")
     public String ping() {
-        return "The MoniQ API is alive and well!";
+        return "The MoniQ API Build via CI/CD is up and running!";
     }
 }
