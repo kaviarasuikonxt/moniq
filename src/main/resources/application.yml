@@ -42,6 +42,8 @@ app:
   # Where to redirect after OAuth2 success with token
   auth:
     frontend-callback: ${FRONTEND_URL}/auth/callback
+    google:
+      enabled: true
 
   # ============ OAuth2 Google ============
   security:
