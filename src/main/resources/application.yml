@@ -39,6 +39,7 @@ app:
     issuer: moniq
     exp-minutes: 60
     secret: ${JWT_SECRET}
+    ttl: 3600
   # Where to redirect after OAuth2 success with token
   auth:
     frontend-callback: ${FRONTEND_URL}/auth/callback

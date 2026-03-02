@@ -1,4 +1,4 @@
-package com.moniq.api.auth.api;
+package com.moniq.api.auth.dto;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;

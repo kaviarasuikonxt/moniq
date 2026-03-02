@@ -13,7 +13,8 @@ public class MeController {
   public Map<String, Object> me(Authentication auth) {
     return Map.of(
         "email", auth.getName(),
-        "authorities", auth.getAuthorities()
+        "authorities", auth.getAuthorities(),
+        "principle", auth.getPrincipal()
     );
   }
 }

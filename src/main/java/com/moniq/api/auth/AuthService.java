@@ -1,5 +1,8 @@
 package com.moniq.api.auth;
 
+import com.moniq.api.auth.dto.AuthResponse;
+import com.moniq.api.auth.dto.LoginRequest;
+import com.moniq.api.auth.dto.RegisterRequest;
 import com.moniq.api.repository.UserRepository;
 import com.moniq.api.security.JwtService;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -22,34 +25,41 @@ public class AuthService {
   }
 
   @Transactional
-  public String registerLocal(String email, String rawPassword) {
+  public void register(RegisterRequest req) {
+    String email = req.email().trim().toLowerCase();
+
     if (userRepository.existsByEmail(email)) {
-      throw new IllegalArgumentException("Email already registered");
+      throw new IllegalArgumentException("EMAIL_ALREADY_EXISTS");
     }
 
     UserEntity user = new UserEntity();
-    user.setEmail(email.toLowerCase());
-    user.setPasswordHash(passwordEncoder.encode(rawPassword));
+    user.setEmail(email);
     user.setProvider(AuthProvider.LOCAL);
-    user.setEmailVerified(false);
+    user.setProviderUserId(null);
+    user.setEmailVerified(false); // later we add verification
+    user.setPasswordHash(passwordEncoder.encode(req.password()));
     user.setRoles(Set.of("USER"));
 
     userRepository.save(user);
-    return jwtService.createToken(user.getId(), user.getEmail(), user.getRoles());
   }
 
-  public String loginLocal(String email, String rawPassword) {
-    UserEntity user = userRepository.findByEmail(email.toLowerCase())
-        .orElseThrow(() -> new IllegalArgumentException("Invalid credentials"));
+  @Transactional(readOnly = true)
+  public AuthResponse login(LoginRequest req) {
+    String email = req.email().trim().toLowerCase();
 
+    UserEntity user = userRepository.findByEmail(email)
+        .orElseThrow(() -> new IllegalArgumentException("INVALID_CREDENTIALS"));
+
+    // If account is social-only
     if (user.getProvider() != AuthProvider.LOCAL || user.getPasswordHash() == null) {
-      throw new IllegalArgumentException("Use social login for this account");
+      throw new IllegalArgumentException("USE_SOCIAL_LOGIN");
     }
 
-    if (!passwordEncoder.matches(rawPassword, user.getPasswordHash())) {
-      throw new IllegalArgumentException("Invalid credentials");
+    if (!passwordEncoder.matches(req.password(), user.getPasswordHash())) {
+      throw new IllegalArgumentException("INVALID_CREDENTIALS");
     }
 
-    return jwtService.createToken(user.getId(), user.getEmail(), user.getRoles());
+    String token = jwtService.createToken(user.getId(), user.getEmail(), user.getRoles());
+    return new AuthResponse(token);
   }
 }

@@ -14,16 +14,16 @@ public class UserEntity {
   @GeneratedValue
   private UUID id;
 
-  @Column(nullable = false)
+@Column(nullable = false, unique = true)
   private String email;
 
   // Nullable for social-only accounts
   @Column(name = "password_hash")
   private String passwordHash;
 
-  @Enumerated(EnumType.STRING)
+   @Enumerated(EnumType.STRING)
   @Column(nullable = false)
-  private AuthProvider provider;
+  private AuthProvider provider = AuthProvider.LOCAL;
 
   @Column(name = "provider_user_id")
   private String providerUserId;
@@ -41,6 +41,13 @@ public class UserEntity {
   @CollectionTable(name = "user_roles", joinColumns = @JoinColumn(name = "user_id"))
   @Column(name = "role")
   private Set<String> roles = new HashSet<>();
+
+ @PrePersist
+  void prePersist() {
+    if (id == null) id = UUID.randomUUID();
+    createdAt = Instant.now();
+    updatedAt = Instant.now();
+  }
 
   @PreUpdate
   public void touch() {
