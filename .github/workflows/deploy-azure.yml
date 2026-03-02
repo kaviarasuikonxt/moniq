@@ -32,3 +32,10 @@ jobs:
           app-name: app-moniq-dev-kp
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: target/*.jar
+
+      - name: Show effective pom contains oauth2-client
+        run: mvn -q help:effective-pom | grep -i "spring-boot-starter-oauth2-client" || true
+
+      - name: Show dependency tree
+        run: mvn -q dependency:tree | grep -i "oauth2-client" || true
+        
