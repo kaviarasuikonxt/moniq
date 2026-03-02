@@ -64,8 +64,8 @@ public class SecurityConfig {
             .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
             .anyRequest().authenticated()
         )
-        .oauth2Login(oauth -> oauth.successHandler(oAuth2SuccessHandler))
-        .httpBasic(Customizer.withDefaults());
+        .oauth2Login(oauth -> oauth.successHandler(oAuth2SuccessHandler));
+        //.httpBasic(Customizer.withDefaults());
 
     http.addFilterBefore(new JwtAuthFilter(jwtService), UsernamePasswordAuthenticationFilter.class);
 
