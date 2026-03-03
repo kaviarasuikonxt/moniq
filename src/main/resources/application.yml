@@ -29,32 +29,29 @@ management:
       exposure:
         include: health,info
 
-jwt:
-  secret: moniq-secret-key-change-later
-  expiration: 86400000
-
-# ============ JWT ============
+# ✅ Use ONLY this app.jwt section going forward
 app:
   jwt:
     issuer: moniq
-    exp-minutes: 60
-    secret: ${JWT_SECRET}
-    ttl: 3600
-  # Where to redirect after OAuth2 success with token
+    secret: ${JWT_SECRET:moniq-secret-local-dev-change}
+    access-ttl-seconds: ${JWT_ACCESS_TTL_SECONDS:900} # 15 minutes
+    refresh-ttl-seconds: ${JWT_REFRESH_TTL_SECONDS:604800} # 7 days
+    refresh-hash-secret: ${JWT_REFRESH_HASH_SECRET:${JWT_SECRET:moniq-secret-local-dev-change}}
+
   auth:
-    frontend-callback: ${FRONTEND_URL}/auth/callback
+    frontend-callback: ${FRONTEND_URL:http://localhost:3000}/auth/callback
     google:
       enabled: true
 
-    access-ttl-seconds: ${JWT_ACCESS_TTL_SECONDS:900} # 15 minutes
-    refresh-ttl-seconds: ${JWT_REFRESH_TTL_SECONDS:604800} # 7 days
-    refresh-hash-secret: ${JWT_REFRESH_HASH_SECRET:${JWT_SECRET}}
-  # ============ OAuth2 Google ============
   security:
     oauth2:
       client:
         registration:
           google:
-            client-id: ${GOOGLE_CLIENT_ID}
-            client-secret: ${GOOGLE_CLIENT_SECRET}
+            client-id: ${GOOGLE_CLIENT_ID:}
+            client-secret: ${GOOGLE_CLIENT_SECRET:}
             scope: openid,profile,email
+
+logging:
+  file:
+    name: "" # disables file logging (console only)

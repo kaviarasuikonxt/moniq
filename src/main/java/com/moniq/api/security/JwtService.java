@@ -6,13 +6,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import com.moniq.api.auth.UserEntity;
-import io.jsonwebtoken.SignatureAlgorithm;
 import java.nio.charset.StandardCharsets;
 import java.security.Key;
 import java.time.Instant;
 import java.util.Date;
-import java.util.Map;
-
 import java.util.Set;
 import java.util.UUID;
 
@@ -42,20 +39,20 @@ public class JwtService {
     return accessTtlSeconds;
   }
 
-  public String generateAccessToken(UserEntity user) {
+ public String generateAccessToken(UserEntity user) {
+
     Instant now = Instant.now();
     Instant exp = now.plusSeconds(accessTtlSeconds);
 
     return Jwts.builder()
-        .setSubject(user.getId().toString())
-        .setIssuedAt(Date.from(now))
-        .setExpiration(Date.from(exp))
-        .addClaims(Map.of(
-            "email", user.getEmail(),
-            "provider", user.getProvider().name()))
-        .signWith(key, SignatureAlgorithm.HS256)
-        .compact();
-  }
+            .subject(user.getId().toString())
+            .issuedAt(Date.from(now))
+            .expiration(Date.from(exp))
+            .claim("email", user.getEmail())
+            .claim("provider", user.getProvider().name())
+            .signWith(key)   // algorithm inferred from key (HS256 automatically)
+            .compact();
+}
 
   public String createToken(UUID userId, String email, Set<String> roles) {
     Instant now = Instant.now();
