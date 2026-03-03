@@ -15,6 +15,7 @@ public class MeController {
         "email", auth.getName(),
         "authorities", auth.getAuthorities(),
         "principle", auth.getPrincipal()
+        //add more user details if needed
     );
   }
 }
