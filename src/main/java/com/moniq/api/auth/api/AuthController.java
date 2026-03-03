@@ -3,19 +3,27 @@ package com.moniq.api.auth.api;
 import com.moniq.api.auth.AuthService;
 import com.moniq.api.auth.dto.AuthResponse;
 import com.moniq.api.auth.dto.LoginRequest;
+import com.moniq.api.auth.dto.RefreshRequest;
 import com.moniq.api.auth.dto.RegisterRequest;
-import jakarta.validation.Valid;
+import com.moniq.api.auth.dto.TokenPairResponse;
+import com.moniq.api.auth.refresh.RefreshTokenService;
+import com.moniq.api.auth.dto.*;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import jakarta.validation.Valid;
 
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
 
   private final AuthService authService;
+  private final RefreshTokenService refreshTokenService;
 
-  public AuthController(AuthService authService) {
+  public AuthController(AuthService authService, RefreshTokenService refreshTokenService) {
     this.authService = authService;
+    this.refreshTokenService = refreshTokenService;
   }
 
   @PostMapping("/register")
@@ -44,4 +52,26 @@ public class AuthController {
       };
     }
   }
+
+ // ===== Day 5 endpoints =====
+
+    /** New: returns access + refresh */
+    @PostMapping("/login/v2")
+    public ResponseEntity<TokenPairResponse> loginV2(@RequestBody LoginRequest req, HttpServletRequest request) {
+        return ResponseEntity.ok(authService.loginV2(req, request));
+    }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<TokenPairResponse> refresh(@RequestBody RefreshRequest req, HttpServletRequest request) {
+        RefreshTokenService.TokenPair pair = refreshTokenService.refresh(req.getRefreshToken(), request);
+        return ResponseEntity.ok(new TokenPairResponse(pair.accessToken(), pair.refreshToken(), pair.expiresInSeconds()));
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(@RequestBody LogoutRequest req) {
+        refreshTokenService.logout(req.getRefreshToken());
+        return ResponseEntity.ok().build();
+    }
+
+
 }

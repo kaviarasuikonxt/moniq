@@ -46,6 +46,9 @@ app:
     google:
       enabled: true
 
+    access-ttl-seconds: ${JWT_ACCESS_TTL_SECONDS:900} # 15 minutes
+    refresh-ttl-seconds: ${JWT_REFRESH_TTL_SECONDS:604800} # 7 days
+    refresh-hash-secret: ${JWT_REFRESH_HASH_SECRET:${JWT_SECRET}}
   # ============ OAuth2 Google ============
   security:
     oauth2:
