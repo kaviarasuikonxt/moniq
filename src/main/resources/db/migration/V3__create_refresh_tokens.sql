@@ -1,16 +1,11 @@
--- V2__create_refresh_tokens.sql (PostgreSQL)
-
--- For gen_random_uuid()
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+-- V3__create_refresh_tokens.sql (Azure-safe: no pgcrypto)
 
 CREATE TABLE IF NOT EXISTS refresh_tokens (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY,
   user_id UUID NOT NULL,
 
-  -- Deterministic hash (HMAC-SHA256) of the *opaque* refresh token
   token_hash VARCHAR(64) NOT NULL,
 
-  -- Token family/session: supports multiple devices/sessions per user
   family_id UUID NOT NULL,
   session_id UUID NOT NULL,
 
@@ -19,10 +14,8 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 
   revoked_at TIMESTAMPTZ NULL,
 
-  -- Rotation linkage
   replaced_by_token_id UUID NULL,
 
-  -- Optional device hints
   user_agent TEXT NULL,
   ip_address VARCHAR(64) NULL,
 
