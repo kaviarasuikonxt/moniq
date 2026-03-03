@@ -17,7 +17,7 @@ import java.util.UUID;
 public class JwtService {
 
   private final String issuer;
-  private final int expMinutes;
+  private final long expMinutes;
   private final byte[] secret;
 
   private final Key key;
@@ -25,9 +25,10 @@ public class JwtService {
 
   public JwtService(
       @Value("${app.jwt.issuer}") String issuer,
-      @Value("${app.jwt.exp-minutes}") int expMinutes,
       @Value("${app.jwt.secret}") String secret,
-      @Value("${app.jwt.access-ttl-seconds}") long accessTtlSeconds) {
+     @Value("${app.jwt.access-ttl-seconds:#{null}}") Long accessTtlSeconds,
+    @Value("${app.jwt.exp-minutes:#{null}}") Long expMinutes
+    ) {
     this.issuer = issuer;
     this.expMinutes = expMinutes;
     this.secret = secret.getBytes(StandardCharsets.UTF_8);

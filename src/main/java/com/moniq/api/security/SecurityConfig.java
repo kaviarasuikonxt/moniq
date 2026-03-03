@@ -4,7 +4,6 @@ import com.moniq.api.oauth.OAuth2SuccessHandler;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -56,15 +55,14 @@ public class SecurityConfig {
                     ).permitAll()
                     .anyRequest().authenticated()
             )
-            // Enable Google OAuth2 ONLY if google client-id is present
-            .oauth2Login(oauth -> {
-                if (googleClientId != null && !googleClientId.isBlank()) {
-                    oauth.successHandler(oAuth2SuccessHandler);
-                }
-            })
-            // ✅ Add filter only ONCE
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+            // ✅ Add filter only ONCE
+           
 
+              // ✅ Only configure oauth2Login when Google is actually configured
+        if (googleClientId != null && !googleClientId.isBlank()) {
+            http.oauth2Login(oauth -> oauth.successHandler(oAuth2SuccessHandler));
+        }
         // IMPORTANT: do NOT enable httpBasic() -> avoids browser popup
         // If you truly need it for debugging, add it back explicitly.
         return http.build();
