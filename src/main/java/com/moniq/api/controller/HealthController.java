@@ -1,6 +1,5 @@
 package com.moniq.api.controller;
 
-import java.util.Map;
 import org.springframework.http.MediaType;
 
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,13 +18,5 @@ public class HealthController {
      public String callback(@RequestParam("token") String token) {
     return "JWT token:\n\n" + token + "\n";
      }
-    @GetMapping("/debug/env")
-        public Map<String, String> env() {
-         return Map.of(
-        "JWT_SECRET", System.getenv("JWT_SECRET") != null ? "SET" : "NOT SET",
-        "GOOGLE_CLIENT_ID", System.getenv("GOOGLE_CLIENT_ID") != null ? "SET" : "NOT SET",
-        "GOOGLE_CLIENT_SECRET", System.getenv("GOOGLE_CLIENT_SECRET") != null ? "SET" : "NOT SET",
-        "FRONTEND_URL", System.getenv("FRONTEND_URL")
-    );
-}
+
 }
