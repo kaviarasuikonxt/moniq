@@ -17,7 +17,7 @@ import java.time.Instant;
 import java.util.List;
 
 @RestControllerAdvice
-public class AuthExceptionHandler {
+public class GlobalAuthExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiErrorResponse> handleValidation(MethodArgumentNotValidException ex, HttpServletRequest req) {
