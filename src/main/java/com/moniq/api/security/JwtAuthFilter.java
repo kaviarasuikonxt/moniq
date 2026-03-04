@@ -9,7 +9,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
-
+import org.slf4j.MDC;
 import java.io.IOException;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -46,6 +46,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
       var auth = new UsernamePasswordAuthenticationToken(claims.email(), null, authorities);
       SecurityContextHolder.getContext().setAuthentication(auth);
+
+
+      // Day 6: correlation enrichment
+      MDC.put("userId", claims.email());
+
     } catch (Exception ex) {
       SecurityContextHolder.clearContext();
     }

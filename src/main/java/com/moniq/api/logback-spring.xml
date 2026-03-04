@@ -1,7 +1,22 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<configuration>
+<!-- src/main/resources/logback-spring.xml -->
+<configuration scan="true">
+
+    <!-- Spring Boot default converters etc -->
     <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
-    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <property name="CONSOLE_LOG_PATTERN"
+              value="%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%thread] %logger{36} - %msg | requestId=%X{requestId} userId=%X{userId}%n"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Reduce noise -->
+    <logger name="org.springframework" level="INFO"/>
+    <logger name="org.springframework.security" level="INFO"/>
+    <logger name="org.hibernate.SQL" level="WARN"/>
 
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>

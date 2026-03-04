@@ -41,8 +41,10 @@ app:
 
   auth:
     frontend-callback: ${FRONTEND_URL:http://localhost:3000}/auth/callback
-    google:
-      enabled: true
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+    #google:
+    # enabled: true
 
   security:
     oauth2:
