@@ -1,15 +1,17 @@
+// src/main/java/com/moniq/api/security/JwtAuthFilter.java
 package com.moniq.api.security;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.MDC;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
-import org.slf4j.MDC;
+
 import java.io.IOException;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -47,12 +49,12 @@ public class JwtAuthFilter extends OncePerRequestFilter {
       var auth = new UsernamePasswordAuthenticationToken(claims.email(), null, authorities);
       SecurityContextHolder.getContext().setAuthentication(auth);
 
-
       // Day 6: correlation enrichment
       MDC.put("userId", claims.email());
 
     } catch (Exception ex) {
       SecurityContextHolder.clearContext();
+      MDC.remove("userId");
     }
 
     filterChain.doFilter(request, response);

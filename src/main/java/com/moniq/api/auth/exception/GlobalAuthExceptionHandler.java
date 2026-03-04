@@ -1,4 +1,4 @@
-// src/main/java/com/moniq/api/auth/exception/AuthExceptionHandler.java
+// src/main/java/com/moniq/api/auth/exception/GlobalAuthExceptionHandler.java
 package com.moniq.api.auth.exception;
 
 import com.moniq.api.auth.refresh.RefreshTokenService;
@@ -35,49 +35,34 @@ public class GlobalAuthExceptionHandler {
         return build(HttpStatus.BAD_REQUEST, "Malformed JSON request", req, null);
     }
 
-    /**
-     * Your code currently throws IllegalArgumentException for business errors.
-     * We map known values to correct status codes.
-     */
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiErrorResponse> handleIllegalArgument(IllegalArgumentException ex, HttpServletRequest req) {
         String msg = safeMsg(ex);
 
-        // 409
         if ("EMAIL_ALREADY_EXISTS".equalsIgnoreCase(msg)) {
             return build(HttpStatus.CONFLICT, "Email already exists", req, null);
         }
 
-        // 401
         if ("INVALID_CREDENTIALS".equalsIgnoreCase(msg)) {
             return build(HttpStatus.UNAUTHORIZED, "Invalid credentials", req, null);
         }
+
         if ("USE_SOCIAL_LOGIN".equalsIgnoreCase(msg)) {
             return build(HttpStatus.UNAUTHORIZED, "Use social login for this account", req, null);
         }
 
-        // default 400
         return build(HttpStatus.BAD_REQUEST, msg.isBlank() ? "Bad request" : msg, req, null);
     }
 
-    /**
-     * Your refresh token service uses a nested UnauthorizedException.
-     * Map it as 401.
-     */
     @ExceptionHandler(RefreshTokenService.UnauthorizedException.class)
     public ResponseEntity<ApiErrorResponse> handleRefreshUnauthorized(RefreshTokenService.UnauthorizedException ex, HttpServletRequest req) {
         return build(HttpStatus.UNAUTHORIZED, safeMsg(ex), req, null);
     }
 
-    /**
-     * Your loginV2 currently throws RuntimeException with text messages.
-     * Treat these as 401 (auth failures) for a clean API.
-     */
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<ApiErrorResponse> handleRuntime(RuntimeException ex, HttpServletRequest req) {
         String msg = safeMsg(ex);
 
-        // Treat common auth failures as 401
         if (msg.toLowerCase().contains("invalid credentials")
                 || msg.toLowerCase().contains("use google login")
                 || msg.toLowerCase().contains("unauthorized")
@@ -85,7 +70,6 @@ public class GlobalAuthExceptionHandler {
             return build(HttpStatus.UNAUTHORIZED, msg, req, null);
         }
 
-        // Else: don’t leak internal errors
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error", req, null);
     }
 

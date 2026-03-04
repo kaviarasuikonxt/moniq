@@ -1,17 +1,19 @@
+// src/main/java/com/moniq/api/security/JwtService.java
 package com.moniq.api.security;
 
+import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import com.moniq.api.auth.UserEntity;
+
+import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
-import java.security.Key;
 import java.time.Instant;
-import java.util.Date;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class JwtService {
@@ -20,15 +22,15 @@ public class JwtService {
   private final long expMinutes;
   private final byte[] secret;
 
-  private final Key key;
+  private final SecretKey key;
   private final long accessTtlSeconds;
 
   public JwtService(
       @Value("${app.jwt.issuer}") String issuer,
       @Value("${app.jwt.secret}") String secret,
-     @Value("${app.jwt.access-ttl-seconds:#{null}}") Long accessTtlSeconds,
-    @Value("${app.jwt.exp-minutes:#{null}}") Long expMinutes
-    ) {
+      @Value("${app.jwt.access-ttl-seconds:#{null}}") Long accessTtlSeconds,
+      @Value("${app.jwt.exp-minutes:#{null}}") Long expMinutes
+  ) {
     this.issuer = issuer;
     this.expMinutes = expMinutes;
     this.secret = secret.getBytes(StandardCharsets.UTF_8);
@@ -40,21 +42,26 @@ public class JwtService {
     return accessTtlSeconds;
   }
 
- public String generateAccessToken(UserEntity user) {
-
+  /** Day 5: used by login/v2 and refresh */
+  public String generateAccessToken(UserEntity user) {
     Instant now = Instant.now();
     Instant exp = now.plusSeconds(accessTtlSeconds);
 
-    return Jwts.builder()
-            .subject(user.getId().toString())
-            .issuedAt(Date.from(now))
-            .expiration(Date.from(exp))
-            .claim("email", user.getEmail())
-            .claim("provider", user.getProvider().name())
-            .signWith(key)   // algorithm inferred from key (HS256 automatically)
-            .compact();
-}
+    Set<String> roles = user.getRoles() == null ? Set.of() : user.getRoles();
 
+    return Jwts.builder()
+        .issuer(issuer) // ✅ keep consistent with legacy
+        .subject(user.getId().toString())
+        .issuedAt(Date.from(now))
+        .expiration(Date.from(exp))
+        .claim("email", user.getEmail())
+        .claim("provider", user.getProvider().name())
+        .claim("roles", roles) // ✅ REQUIRED for JwtAuthFilter + /api/me
+        .signWith(key) // algorithm inferred; same secret => OK
+        .compact();
+  }
+
+  /** Day 4 legacy token (keep as-is so you don’t break Day 4) */
   public String createToken(UUID userId, String email, Set<String> roles) {
     Instant now = Instant.now();
     Instant exp = now.plusSeconds(expMinutes * 60L);
@@ -71,19 +78,42 @@ public class JwtService {
   }
 
   public JwtClaims parseAndValidate(String token) {
-    var claims = Jwts.parser()
+    Claims claims = Jwts.parser()
         .verifyWith(Keys.hmacShaKeyFor(secret))
         .build()
         .parseSignedClaims(token)
         .getPayload();
 
-    @SuppressWarnings("unchecked")
-    Set<String> roles = (Set<String>) claims.get("roles", Set.class);
+    String subject = claims.getSubject();
+    String email = claims.get("email", String.class);
+
+    // ✅ SAFE roles parsing (works if it's Set, List, or null)
+    Set<String> roles = extractRoles(claims);
 
     return new JwtClaims(
-        UUID.fromString(claims.getSubject()),
-        claims.get("email", String.class),
-        roles);
+        UUID.fromString(subject),
+        email,
+        roles
+    );
+  }
+
+  private Set<String> extractRoles(Claims claims) {
+    Object raw = claims.get("roles");
+    if (raw == null) return Set.of();
+
+    if (raw instanceof Collection<?> col) {
+      return col.stream()
+          .filter(Objects::nonNull)
+          .map(Object::toString)
+          .map(String::trim)
+          .filter(s -> !s.isBlank())
+          .collect(Collectors.toSet());
+    }
+
+    // If somehow stored as a single string
+    String asString = raw.toString().trim();
+    if (asString.isBlank()) return Set.of();
+    return Set.of(asString);
   }
 
   public record JwtClaims(UUID userId, String email, Set<String> roles) {
