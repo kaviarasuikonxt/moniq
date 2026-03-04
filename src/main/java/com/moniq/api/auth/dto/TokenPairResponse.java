@@ -13,6 +13,12 @@ public class TokenPairResponse {
         this.refreshToken = refreshToken;
         this.expiresInSeconds = expiresInSeconds;
     }
+    public TokenPairResponse(String accessToken, String refreshToken, String tokenType, long expiresInSeconds) {
+            this.accessToken = accessToken;
+            this.refreshToken = refreshToken;
+            this.tokenType = tokenType;
+            this.expiresInSeconds = expiresInSeconds;
+        }
 
     public String getAccessToken() { return accessToken; }
     public void setAccessToken(String accessToken) { this.accessToken = accessToken; }

@@ -62,9 +62,14 @@ public class AuthController {
     }
 
     @PostMapping("/refresh")
-    public ResponseEntity<TokenPairResponse> refresh(@RequestBody RefreshRequest req, HttpServletRequest request) {
+    public TokenPairResponse refresh(@RequestBody RefreshRequest req, HttpServletRequest request) {
         RefreshTokenService.TokenPair pair = refreshTokenService.refresh(req.getRefreshToken(), request);
-        return ResponseEntity.ok(new TokenPairResponse(pair.accessToken(), pair.refreshToken(), pair.expiresInSeconds()));
+        return new TokenPairResponse(
+          pair.accessToken(), 
+          pair.refreshToken(),
+          "Bearer",
+          pair.expiresInSeconds()
+          );
     }
 
     
