@@ -4,11 +4,13 @@ import com.moniq.api.oauth.OAuth2SuccessHandler;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
@@ -22,10 +24,6 @@ public class SecurityConfig {
         return new BCryptPasswordEncoder();
     }
 
-    /**
-     * ✅ Ensure JwtAuthFilter is a Spring bean
-     * (so SecurityConfig can always inject/use it safely)
-     */
     @Bean
     public JwtAuthFilter jwtAuthFilter(JwtService jwtService) {
         return new JwtAuthFilter(jwtService);
@@ -41,30 +39,34 @@ public class SecurityConfig {
         http
             .csrf(csrf -> csrf.disable())
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+
+            // ✅ IMPORTANT: don’t redirect APIs to Google. Return 401 instead.
+            .exceptionHandling(ex -> ex.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
+
             .authorizeHttpRequests(auth -> auth
-                    .requestMatchers(
-                            "/auth/register",
-                            "/auth/login",
-                            "/auth/login/v2",
-                            "/auth/refresh",
-                            "/auth/logout",
-                            "/oauth2/**",
-                            "/login/**",
-                            "/actuator/health",
-                            "/actuator/info"
-                    ).permitAll()
-                    .anyRequest().authenticated()
+                .requestMatchers(
+                        "/",                      // optional
+                        "/ping",
+                        "/auth/callback",         // your callback controller
+                        "/auth/register",
+                        "/auth/login",
+                        "/auth/login/v2",
+                        "/auth/refresh",
+                        "/auth/logout",
+                        "/oauth2/**",
+                        "/login/**",
+                        "/actuator/health",
+                        "/actuator/info"
+                ).permitAll()
+                .anyRequest().authenticated()
             )
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
-            // ✅ Add filter only ONCE
-           
 
-              // ✅ Only configure oauth2Login when Google is actually configured
+        // ✅ Enable Google OAuth2 ONLY if google client-id is present
         if (googleClientId != null && !googleClientId.isBlank()) {
             http.oauth2Login(oauth -> oauth.successHandler(oAuth2SuccessHandler));
         }
-        // IMPORTANT: do NOT enable httpBasic() -> avoids browser popup
-        // If you truly need it for debugging, add it back explicitly.
+
         return http.build();
     }
 }
