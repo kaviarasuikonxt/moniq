@@ -34,6 +34,7 @@ public class RequestCorrelationFilter extends OncePerRequestFilter {
         } finally {
             MDC.remove("requestId");
             MDC.remove("userId");
+            
         }
     }
 }
