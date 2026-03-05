@@ -44,6 +44,17 @@ app:
     refresh-ttl-seconds: ${JWT_REFRESH_TTL_SECONDS:604800} # 7 days
     refresh-hash-secret: ${JWT_REFRESH_HASH_SECRET:${JWT_SECRET:moniq-secret-local-dev-change}}
 
+  ai:
+    enabled: ${APP_AI_ENABLED:false}
+  ocr:
+    worker:
+      enabled: ${APP_OCR_WORKER_ENABLED:false} # local false, prod true
+      poll-interval-ms: ${APP_OCR_WORKER_POLL_INTERVAL_MS:2000}
+      visibility-timeout-seconds: ${APP_OCR_WORKER_VISIBILITY_TIMEOUT_SECONDS:60}
+    vision:
+      poll-delay-ms: ${APP_OCR_VISION_POLL_DELAY_MS:800}
+      max-wait-ms: ${APP_OCR_VISION_MAX_WAIT_MS:30000}
+
   auth:
     frontend-callback: ${FRONTEND_URL:http://localhost:3000}/auth/callback
   cors:
@@ -68,6 +79,13 @@ app:
 logging:
   file:
     name: "" # disables file logging (console only)
-storage:
-  connection-string: ${AZURE_STORAGE_CONNECTION_STRING:}
-  container-receipts: ${AZURE_STORAGE_CONTAINER_RECEIPTS:receipts}
+azure:
+  storage:
+    connection-string: ${AZURE_STORAGE_CONNECTION_STRING:}
+    container-receipts: ${AZURE_STORAGE_CONTAINER_RECEIPTS:receipts}
+    queue:
+      receipt-ocr: ${AZURE_STORAGE_QUEUE_RECEIPT_OCR:receipt-ocr}
+
+  vision:
+    endpoint: ${AZURE_VISION_ENDPOINT:}
+    key: ${AZURE_VISION_KEY:}

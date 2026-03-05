@@ -1,21 +1,22 @@
 package com.moniq.api.storage;
 
-import com.azure.storage.blob.BlobClient;
-import com.azure.storage.blob.BlobContainerClient;
-import com.azure.storage.blob.models.BlobHttpHeaders;
-import com.azure.storage.blob.sas.BlobSasPermission;
-import com.azure.storage.blob.sas.BlobServiceSasSignatureValues;
-import com.azure.storage.common.sas.SasProtocol;
+import java.io.InputStream;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.time.OffsetDateTime;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Service;
 
-import java.io.InputStream;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
-import java.time.OffsetDateTime;
+import com.azure.storage.blob.BlobClient;
+import com.azure.storage.blob.BlobContainerClient;
+import com.azure.storage.blob.models.BlobHttpHeaders;
+import com.azure.storage.blob.sas.BlobSasPermission;
+import com.azure.storage.blob.sas.BlobServiceSasSignatureValues;
+import com.azure.storage.common.sas.SasProtocol;
 
 @Service
 @EnableConfigurationProperties(ReceiptUploadProperties.class)
@@ -37,6 +38,11 @@ public class BlobStorageService {
         blobClient.upload(data, length, true);
         blobClient.setHttpHeaders(new BlobHttpHeaders().setContentType(contentType));
     }
+ public void deleteIfExists(String blobName) {
+    BlobContainerClient receiptsContainer = ensureConfigured();
+    BlobClient blobClient = receiptsContainer.getBlobClient(blobName);
+    blobClient.deleteIfExists();
+}
 
     public String resolveFileUrl(String blobName) {
         BlobContainerClient receiptsContainer = ensureConfigured();
@@ -60,6 +66,16 @@ public class BlobStorageService {
         return blobClient.getBlobUrl() + "?" + sas;
     }
 
+    /**
+     * Day 8: Worker needs to read blob content as stream (no local file writes).
+     * Caller should close the returned InputStream.
+     */
+    public InputStream openStream(String blobName) {
+        BlobContainerClient receiptsContainer = ensureConfigured();
+        BlobClient blobClient = receiptsContainer.getBlobClient(blobName);
+        return blobClient.openInputStream();
+    }
+
     private BlobContainerClient ensureConfigured() {
         BlobContainerClient client = receiptsContainerProvider.getIfAvailable();
         if (client == null) {
@@ -78,4 +94,7 @@ public class BlobStorageService {
         log.info("Blob Path: {}", sb.toString());
         return sb.toString();
     }
+
+   
+   
 }

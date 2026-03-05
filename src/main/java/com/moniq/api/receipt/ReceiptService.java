@@ -1,20 +1,31 @@
 package com.moniq.api.receipt;
 
-import com.moniq.api.auth.UserEntity;
-import com.moniq.api.receipt.dto.ReceiptResponse;
-import com.moniq.api.repository.UserRepository;
-import com.moniq.api.storage.BlobStorageService;
-import com.moniq.api.storage.ReceiptUploadProperties;
+import java.io.InputStream;
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.NoSuchElementException;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.InputStream;
-import java.math.BigDecimal;
-import java.time.OffsetDateTime;
-import java.util.*;
+import com.moniq.api.auth.UserEntity;
+import com.moniq.api.ocr.ReceiptOcrQueueService;
+import com.moniq.api.receipt.dto.ReceiptResponse;
+import com.moniq.api.repository.UserRepository;
+import com.moniq.api.storage.BlobStorageService;
+import com.moniq.api.storage.ReceiptUploadProperties;
+import com.moniq.api.web.RequestCorrelation;
+
+import jakarta.transaction.Transactional;
 
 @Service
 public class ReceiptService {
@@ -35,17 +46,20 @@ public class ReceiptService {
     private final UserRepository userRepository;
     private final BlobStorageService blobStorageService;
     private final ReceiptUploadProperties uploadProps;
+    private final ReceiptOcrQueueService queueService;
 
     public ReceiptService(
             ReceiptRepository receiptRepository,
             UserRepository userRepository,
             BlobStorageService blobStorageService,
-            ReceiptUploadProperties uploadProps
+            ReceiptUploadProperties uploadProps,
+            ReceiptOcrQueueService queueService
     ) {
         this.receiptRepository = receiptRepository;
         this.userRepository = userRepository;
         this.blobStorageService = blobStorageService;
         this.uploadProps = uploadProps;
+        this.queueService = queueService;
     }
 
     public ReceiptResponse uploadReceipt(
@@ -224,4 +238,69 @@ public class ReceiptService {
 
         return "application/octet-stream";
     }
+@Transactional
+public ReceiptEntity createReceipt(UUID userId, MultipartFile file) {
+
+    ReceiptEntity receipt = new ReceiptEntity();
+    receipt.setId(UUID.randomUUID());
+    receipt.setUserId(userId);
+    receipt.setStatus(ReceiptStatus.UPLOADED);
+    receipt.setContentType(file.getContentType());
+    receipt.setFileName(file.getOriginalFilename());
+
+    String blobName = buildBlobName(userId, receipt.getId(), file.getOriginalFilename());
+    receipt.setBlobName(blobName);
+
+    receiptRepository.save(receipt);
+
+    String originalName = safeFileName(
+            java.util.Objects.requireNonNullElse(file.getOriginalFilename(), "receipt")
+    );
+    String normalizedType = normalizeContentType(file.getContentType(), originalName);
+
+    log.info("[{}] Blob name for receipt upload: {}",
+            RequestCorrelation.getRequestId(), blobName);
+
+    // Upload first
+    try (InputStream in = file.getInputStream()) {
+        blobStorageService.upload(blobName, in, file.getSize(), normalizedType);
+    } catch (Exception e) {
+        throw new IllegalStateException("Failed to upload receipt to storage", e);
+    }
+
+    // Enqueue next. If enqueue fails, delete blob to avoid orphan.
+    try {
+        queueService.enqueue(receipt.getId(), userId, blobName, normalizedType);
+    } catch (Exception e) {
+        // Best-effort cleanup (do not hide original error)
+        try {
+            blobStorageService.deleteIfExists(blobName);
+        } catch (Exception cleanupEx) {
+            log.warn("[{}] Failed to cleanup blob after enqueue failure blobName={} err={}",
+                    RequestCorrelation.getRequestId(), blobName, cleanupEx.getMessage());
+        }
+        throw e;
+    }
+
+    // Mark OCR_PENDING only after enqueue succeeds
+    receipt.setStatus(ReceiptStatus.OCR_PENDING);
+    receiptRepository.save(receipt);
+
+    log.info("[{}] Receipt uploaded & OCR enqueued receiptId={} userId={} blobName={}",
+            RequestCorrelation.getRequestId(), receipt.getId(), userId, blobName);
+
+    return receipt;
+}
+@SuppressWarnings("unused")
+    private static String safeContentType(String ct) {
+        if (ct == null || ct.isBlank()) return "application/octet-stream";
+        return ct;
+    }
+
+    private String buildBlobName(UUID userId, UUID receiptId, String originalName) {
+        String safe = (originalName == null || originalName.isBlank()) ? "receipt" : originalName.replaceAll("[^a-zA-Z0-9._-]", "_");
+        return "receipts/" + userId + "/" + receiptId + "/" + safe;
+    }
+
+   
 }
