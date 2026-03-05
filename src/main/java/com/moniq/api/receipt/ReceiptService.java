@@ -19,9 +19,12 @@ public class ReceiptService {
 
     private static final Set<String> ALLOWED_CONTENT_TYPES = Set.of(
             "image/jpeg",
+            "image/jpg",
+            "image/pjpeg",
             "image/png",
-            "application/pdf"
-    );
+            "application/pdf",
+            "application/x-pdf",
+            "application/octet-stream");
 
     private final ReceiptRepository receiptRepository;
     private final UserRepository userRepository;
@@ -32,8 +35,7 @@ public class ReceiptService {
             ReceiptRepository receiptRepository,
             UserRepository userRepository,
             BlobStorageService blobStorageService,
-            ReceiptUploadProperties uploadProps
-    ) {
+            ReceiptUploadProperties uploadProps) {
         this.receiptRepository = receiptRepository;
         this.userRepository = userRepository;
         this.blobStorageService = blobStorageService;
@@ -46,8 +48,7 @@ public class ReceiptService {
             String merchant,
             OffsetDateTime receiptDate,
             BigDecimal totalAmount,
-            String currency
-    ) {
+            String currency) {
         UserEntity user = userRepository.findByEmail(userEmail)
                 .orElseThrow(() -> new IllegalArgumentException("User not found for email"));
 
@@ -91,8 +92,7 @@ public class ReceiptService {
                 saved.getTotalAmount(),
                 saved.getCurrency(),
                 saved.getStatus(),
-                saved.getCreatedAt()
-        );
+                saved.getCreatedAt());
     }
 
     public List<ReceiptResponse> listReceipts(String userEmail) {
@@ -114,8 +114,7 @@ public class ReceiptService {
                     r.getTotalAmount(),
                     r.getCurrency(),
                     r.getStatus(),
-                    r.getCreatedAt()
-            ));
+                    r.getCreatedAt()));
         }
         return out;
     }
@@ -142,8 +141,7 @@ public class ReceiptService {
                 r.getTotalAmount(),
                 r.getCurrency(),
                 r.getStatus(),
-                r.getCreatedAt()
-        );
+                r.getCreatedAt());
     }
 
     private void validateFile(MultipartFile file) {
@@ -151,7 +149,12 @@ public class ReceiptService {
             throw new IllegalArgumentException("File is required");
         }
         String ct = file.getContentType();
-        if (ct == null || !ALLOWED_CONTENT_TYPES.contains(ct)) {
+        String name = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase(Locale.ROOT);
+
+        boolean allowedByContentType = (ct != null && ALLOWED_CONTENT_TYPES.contains(ct));
+        boolean allowedByExtension = name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png")
+                || name.endsWith(".pdf") || name.endsWith(".pjpeg");
+        if (!allowedByContentType && !allowedByExtension) {
             throw new IllegalArgumentException("Invalid content-type. Allowed: image/jpeg, image/png, application/pdf");
         }
         long size = file.getSize();
@@ -167,12 +170,14 @@ public class ReceiptService {
         String trimmed = name.trim();
         // Basic sanitation to avoid weird paths
         trimmed = trimmed.replace("\\", "_").replace("/", "_");
-        if (trimmed.isBlank()) return "receipt";
+        if (trimmed.isBlank())
+            return "receipt";
         return trimmed;
     }
 
     private String blankToNull(String s) {
-        if (s == null) return null;
+        if (s == null)
+            return null;
         String t = s.trim();
         return t.isEmpty() ? null : t;
     }
