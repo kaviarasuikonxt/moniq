@@ -1,10 +1,12 @@
 package com.moniq.api.receipt;
 
+import com.moniq.api.auth.UserEntity;
 import com.moniq.api.receipt.dto.ReceiptResponse;
 import com.moniq.api.repository.UserRepository;
-import com.moniq.api.auth.UserEntity;
 import com.moniq.api.storage.BlobStorageService;
 import com.moniq.api.storage.ReceiptUploadProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -17,6 +19,8 @@ import java.util.*;
 @Service
 public class ReceiptService {
 
+    private static final Logger log = LoggerFactory.getLogger(ReceiptService.class);
+
     private static final Set<String> ALLOWED_CONTENT_TYPES = Set.of(
             "image/jpeg",
             "image/jpg",
@@ -24,7 +28,8 @@ public class ReceiptService {
             "image/png",
             "application/pdf",
             "application/x-pdf",
-            "application/octet-stream");
+            "application/octet-stream"
+    );
 
     private final ReceiptRepository receiptRepository;
     private final UserRepository userRepository;
@@ -35,7 +40,8 @@ public class ReceiptService {
             ReceiptRepository receiptRepository,
             UserRepository userRepository,
             BlobStorageService blobStorageService,
-            ReceiptUploadProperties uploadProps) {
+            ReceiptUploadProperties uploadProps
+    ) {
         this.receiptRepository = receiptRepository;
         this.userRepository = userRepository;
         this.blobStorageService = blobStorageService;
@@ -48,7 +54,8 @@ public class ReceiptService {
             String merchant,
             OffsetDateTime receiptDate,
             BigDecimal totalAmount,
-            String currency) {
+            String currency
+    ) {
         UserEntity user = userRepository.findByEmail(userEmail)
                 .orElseThrow(() -> new IllegalArgumentException("User not found for email"));
 
@@ -56,10 +63,15 @@ public class ReceiptService {
 
         UUID receiptId = UUID.randomUUID();
         String originalName = safeFileName(Objects.requireNonNullElse(file.getOriginalFilename(), "receipt"));
+
+        // NOTE: you currently get receipts/receipts/... because container is "receipts"
+        // and blobName starts with "receipts/". We'll keep it unchanged for now.
         String blobName = "receipts/" + user.getId() + "/" + receiptId + "/" + originalName;
 
+        String normalizedType = normalizeContentType(file.getContentType(), originalName);
+
         try (InputStream in = file.getInputStream()) {
-            blobStorageService.upload(blobName, in, file.getSize(), file.getContentType());
+            blobStorageService.upload(blobName, in, file.getSize(), normalizedType);
         } catch (Exception e) {
             throw new IllegalStateException("Failed to upload receipt to storage", e);
         }
@@ -73,11 +85,20 @@ public class ReceiptService {
         entity.setCurrency((currency == null || currency.isBlank()) ? "SGD" : currency.trim().toUpperCase(Locale.ROOT));
         entity.setStatus(ReceiptStatus.UPLOADED);
         entity.setBlobName(blobName);
-        entity.setContentType(file.getContentType());
+
+        entity.setContentType(normalizedType);
         entity.setFileName(originalName);
         entity.setFileSizeBytes(file.getSize());
 
         ReceiptEntity saved = receiptRepository.save(entity);
+
+        log.info("Receipt uploaded id={} user={} file={} size={} contentType={}",
+                saved.getId(),
+                user.getEmail(),
+                saved.getFileName(),
+                saved.getFileSizeBytes(),
+                saved.getContentType()
+        );
 
         String url = blobStorageService.resolveFileUrl(saved.getBlobName());
 
@@ -92,7 +113,8 @@ public class ReceiptService {
                 saved.getTotalAmount(),
                 saved.getCurrency(),
                 saved.getStatus(),
-                saved.getCreatedAt());
+                saved.getCreatedAt()
+        );
     }
 
     public List<ReceiptResponse> listReceipts(String userEmail) {
@@ -114,7 +136,8 @@ public class ReceiptService {
                     r.getTotalAmount(),
                     r.getCurrency(),
                     r.getStatus(),
-                    r.getCreatedAt()));
+                    r.getCreatedAt()
+            ));
         }
         return out;
     }
@@ -141,22 +164,26 @@ public class ReceiptService {
                 r.getTotalAmount(),
                 r.getCurrency(),
                 r.getStatus(),
-                r.getCreatedAt());
+                r.getCreatedAt()
+        );
     }
 
     private void validateFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("File is required");
         }
+
         String ct = file.getContentType();
         String name = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase(Locale.ROOT);
 
         boolean allowedByContentType = (ct != null && ALLOWED_CONTENT_TYPES.contains(ct));
-        boolean allowedByExtension = name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png")
-                || name.endsWith(".pdf") || name.endsWith(".pjpeg");
+        boolean allowedByExtension =
+                name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".pdf");
+
         if (!allowedByContentType && !allowedByExtension) {
             throw new IllegalArgumentException("Invalid content-type. Allowed: image/jpeg, image/png, application/pdf");
         }
+
         long size = file.getSize();
         if (size <= 0) {
             throw new IllegalArgumentException("Invalid file");
@@ -168,17 +195,30 @@ public class ReceiptService {
 
     private String safeFileName(String name) {
         String trimmed = name.trim();
-        // Basic sanitation to avoid weird paths
         trimmed = trimmed.replace("\\", "_").replace("/", "_");
-        if (trimmed.isBlank())
-            return "receipt";
+        if (trimmed.isBlank()) return "receipt";
         return trimmed;
     }
 
     private String blankToNull(String s) {
-        if (s == null)
-            return null;
+        if (s == null) return null;
         String t = s.trim();
         return t.isEmpty() ? null : t;
+    }
+
+    private String normalizeContentType(String contentType, String fileName) {
+        if (contentType != null && !contentType.equalsIgnoreCase("application/octet-stream")) {
+            return contentType;
+        }
+        if (fileName == null) {
+            return "application/octet-stream";
+        }
+
+        String name = fileName.toLowerCase(Locale.ROOT);
+        if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
+        if (name.endsWith(".png")) return "image/png";
+        if (name.endsWith(".pdf")) return "application/pdf";
+
+        return "application/octet-stream";
     }
 }
