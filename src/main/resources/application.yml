@@ -54,7 +54,7 @@ app:
   receipts:
     max-file-bytes: ${APP_RECEIPTS_MAX_FILE_BYTES:10485760} # 10MB default
     sas-ttl-minutes: ${APP_RECEIPTS_SAS_TTL_MINUTES:60}
-    public-base-url: ${APP_RECEIPTS_PUBLIC_BASE_URL:} # optional (if you set public container/CDN)
+  # public-base-url: ${APP_RECEIPTS_PUBLIC_BASE_URL:} # optional (if you set public container/CDN)
 
   security:
     oauth2:

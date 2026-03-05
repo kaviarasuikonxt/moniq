@@ -66,7 +66,8 @@ public class ReceiptService {
 
         // NOTE: you currently get receipts/receipts/... because container is "receipts"
         // and blobName starts with "receipts/". We'll keep it unchanged for now.
-        String blobName = "receipts/" + user.getId() + "/" + receiptId + "/" + originalName;
+       // String blobName = "receipts/" + user.getId() + "/" + receiptId + "/" + originalName;
+        String blobName = user.getId() + "/" + receiptId + "/" + originalName;
 
         String normalizedType = normalizeContentType(file.getContentType(), originalName);
 
