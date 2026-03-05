@@ -68,6 +68,8 @@ public class ReceiptService {
         // and blobName starts with "receipts/". We'll keep it unchanged for now.
        // String blobName = "receipts/" + user.getId() + "/" + receiptId + "/" + originalName;
         String blobName = user.getId() + "/" + receiptId + "/" + originalName;
+        log.info("Blob name for receipt upload: {}", blobName);
+              
 
         String normalizedType = normalizeContentType(file.getContentType(), originalName);
 
