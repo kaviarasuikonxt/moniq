@@ -6,6 +6,8 @@ import com.azure.storage.blob.models.BlobHttpHeaders;
 import com.azure.storage.blob.sas.BlobSasPermission;
 import com.azure.storage.blob.sas.BlobServiceSasSignatureValues;
 import com.azure.storage.common.sas.SasProtocol;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Service;
@@ -19,6 +21,7 @@ import java.time.OffsetDateTime;
 @EnableConfigurationProperties(ReceiptUploadProperties.class)
 public class BlobStorageService {
 
+    private static final Logger log = LoggerFactory.getLogger(BlobStorageService.class);
     private final ObjectProvider<BlobContainerClient> receiptsContainerProvider;
     private final ReceiptUploadProperties uploadProps;
 
@@ -72,6 +75,7 @@ public class BlobStorageService {
             if (i > 0) sb.append("/");
             sb.append(URLEncoder.encode(parts[i], StandardCharsets.UTF_8));
         }
+        log.info("Blob Path: {}", sb.toString());
         return sb.toString();
     }
 }
