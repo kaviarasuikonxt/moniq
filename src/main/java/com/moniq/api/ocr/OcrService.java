@@ -50,33 +50,39 @@ public class OcrService {
         this.aiEnabled = aiEnabled;
     }
 
-    public OcrProviderResult runOcrAndPersist(UUID receiptId, InputStream blobStream, String contentType) {
-        OcrProviderResult result = ocrProvider.read(blobStream, contentType);
+   public OcrProviderResult runOcrAndPersist(UUID receiptId, InputStream blobStream, String contentType) {
+    OcrProviderResult result = ocrProvider.read(blobStream, contentType);
 
-        ReceiptOcrResultEntity entity = new ReceiptOcrResultEntity();
-        entity.setReceiptId(receiptId);
-        entity.setRawText(result.getRawText() == null ? "" : result.getRawText());
-        entity.setOcrJson(result.getNormalizedJson());
-        entity.setProvider(ocrProvider.providerName());
-        entity.setCreatedAt(OffsetDateTime.now());
-        ocrRepo.save(entity);
+    ReceiptOcrResultEntity entity = new ReceiptOcrResultEntity();
+    entity.setReceiptId(receiptId);
+    entity.setRawText(result.getRawText() == null ? "" : result.getRawText());
 
-        log.info("[{}] OCR persisted receiptId={} chars={}",
+    String normalizedJson = result.getNormalizedJson();
+    if (normalizedJson == null || normalizedJson.isBlank()) {
+        normalizedJson = "{}";
+    }
+    entity.setOcrJson(normalizedJson);
+
+    entity.setProvider(ocrProvider.providerName());
+    entity.setCreatedAt(OffsetDateTime.now());
+
+    ocrRepo.save(entity);
+
+    log.info("[{}] OCR persisted receiptId={} chars={}",
             RequestCorrelation.getRequestId(), receiptId, entity.getRawText().length());
 
-        // Rebuild items idempotently
-        itemRepo.deleteByReceiptId(receiptId);
+    itemRepo.deleteByReceiptId(receiptId);
 
-        List<ReceiptItemEntity> items = extractItems(receiptId, entity.getRawText());
-        items = categorize(items);
+    List<ReceiptItemEntity> items = extractItems(receiptId, entity.getRawText());
+    items = categorize(items);
 
-        itemRepo.saveAll(items);
+    itemRepo.saveAll(items);
 
-        log.info("[{}] Items extracted receiptId={} items={}",
+    log.info("[{}] Items extracted receiptId={} items={}",
             RequestCorrelation.getRequestId(), receiptId, items.size());
 
-        return result;
-    }
+    return result;
+}
 
     public Optional<ReceiptOcrResultEntity> getOcrResult(UUID receiptId) {
         return ocrRepo.findById(receiptId);

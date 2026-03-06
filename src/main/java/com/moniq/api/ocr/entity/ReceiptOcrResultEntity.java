@@ -5,6 +5,9 @@ import jakarta.persistence.*;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 @Entity
 @Table(name = "receipt_ocr_results")
 public class ReceiptOcrResultEntity {
@@ -20,9 +23,17 @@ public class ReceiptOcrResultEntity {
      * Store normalized OCR JSON as text, persisted to Postgres JSONB.
      * Keeps DB flexible without requiring special Hibernate JSON types.
      */
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "ocr_json", columnDefinition = "jsonb")
     private String ocrJson;
 
+    public String getOcrJson() {
+        return ocrJson;
+    }
+
+    public void setOcrJson(String ocrJson) {
+        this.ocrJson = ocrJson;
+    }
     @Column(name = "provider", nullable = false, length = 32)
     private String provider = "AZURE_VISION";
 
@@ -41,8 +52,7 @@ public class ReceiptOcrResultEntity {
     public String getRawText() { return rawText; }
     public void setRawText(String rawText) { this.rawText = rawText; }
 
-    public String getOcrJson() { return ocrJson; }
-    public void setOcrJson(String ocrJson) { this.ocrJson = ocrJson; }
+   
 
     public String getProvider() { return provider; }
     public void setProvider(String provider) { this.provider = provider; }
