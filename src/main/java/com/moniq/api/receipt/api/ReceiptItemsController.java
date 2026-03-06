@@ -1,27 +1,27 @@
 // src/main/java/com/moniq/api/receipt/api/ReceiptItemsController.java
 package com.moniq.api.receipt.api;
 
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
 import com.moniq.api.ocr.OcrService;
 import com.moniq.api.ocr.entity.ReceiptItemEntity;
 import com.moniq.api.ocr.entity.ReceiptOcrResultEntity;
 import com.moniq.api.receipt.ReceiptEntity;
 import com.moniq.api.receipt.ReceiptRepository;
-import com.moniq.api.receipt.dto.*;
-import com.moniq.api.repository.UserRepository;
+import com.moniq.api.receipt.dto.ReceiptItemResponse;
+import com.moniq.api.receipt.dto.ReceiptItemsResponse;
+import com.moniq.api.receipt.dto.ReceiptOcrResponse;
 import com.moniq.api.security.CurrentUserIdResolver;
-
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.web.bind.annotation.*;
-
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
 
 @RestController
