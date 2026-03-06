@@ -30,6 +30,11 @@ public class ReceiptOcrWorkerProcessor {
     public void process(OcrJobMessage job) {
         UUID receiptId = job.getReceiptId();
 
+        if (!receiptFacade.markOcrRunning(job.getReceiptId())) {
+    log.warn("[{}] Receipt not found for OCR job receiptId={}",
+            RequestCorrelation.getRequestId(), job.getReceiptId());
+    return;
+}
         // Idempotency: if already completed, skip.
         if (receiptFacade.isOcrCompleted(receiptId)) {
             log.info("[{}] Skip OCR receiptId={} already OCR_COMPLETED", RequestCorrelation.getRequestId(), receiptId);

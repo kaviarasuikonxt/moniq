@@ -249,6 +249,9 @@ public class ReceiptService {
 
         String blobName = buildBlobName(userId, receipt.getId(), file.getOriginalFilename());
         receipt.setBlobName(blobName);
+        OffsetDateTime now = OffsetDateTime.now();
+receipt.setCreatedAt(now);
+receipt.setUpdatedAt(now);
 
         receiptRepository.save(receipt);
 
@@ -294,6 +297,7 @@ public class ReceiptService {
                 RequestCorrelation.getRequestId(), receipt.getId());
         // Mark OCR_PENDING only after enqueue succeeds
         receipt.setStatus(ReceiptStatus.OCR_PENDING);
+        receipt.setUpdatedAt(OffsetDateTime.now());
         receiptRepository.save(receipt);
         log.info("[{}] AFTER status update receiptId={} status={}",
                 RequestCorrelation.getRequestId(), receipt.getId(), receipt.getStatus());
