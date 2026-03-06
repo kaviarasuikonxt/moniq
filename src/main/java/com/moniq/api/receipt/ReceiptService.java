@@ -39,8 +39,7 @@ public class ReceiptService {
             "image/png",
             "application/pdf",
             "application/x-pdf",
-            "application/octet-stream"
-    );
+            "application/octet-stream");
 
     private final ReceiptRepository receiptRepository;
     private final UserRepository userRepository;
@@ -53,8 +52,7 @@ public class ReceiptService {
             UserRepository userRepository,
             BlobStorageService blobStorageService,
             ReceiptUploadProperties uploadProps,
-            ReceiptOcrQueueService queueService
-    ) {
+            ReceiptOcrQueueService queueService) {
         this.receiptRepository = receiptRepository;
         this.userRepository = userRepository;
         this.blobStorageService = blobStorageService;
@@ -68,8 +66,7 @@ public class ReceiptService {
             String merchant,
             OffsetDateTime receiptDate,
             BigDecimal totalAmount,
-            String currency
-    ) {
+            String currency) {
         UserEntity user = userRepository.findByEmail(userEmail)
                 .orElseThrow(() -> new IllegalArgumentException("User not found for email"));
 
@@ -80,10 +77,10 @@ public class ReceiptService {
 
         // NOTE: you currently get receipts/receipts/... because container is "receipts"
         // and blobName starts with "receipts/". We'll keep it unchanged for now.
-       // String blobName = "receipts/" + user.getId() + "/" + receiptId + "/" + originalName;
+        // String blobName = "receipts/" + user.getId() + "/" + receiptId + "/" +
+        // originalName;
         String blobName = user.getId() + "/" + receiptId + "/" + originalName;
         log.info("Blob name for receipt upload: {}", blobName);
-              
 
         String normalizedType = normalizeContentType(file.getContentType(), originalName);
 
@@ -114,8 +111,7 @@ public class ReceiptService {
                 user.getEmail(),
                 saved.getFileName(),
                 saved.getFileSizeBytes(),
-                saved.getContentType()
-        );
+                saved.getContentType());
 
         String url = blobStorageService.resolveFileUrl(saved.getBlobName());
 
@@ -130,8 +126,7 @@ public class ReceiptService {
                 saved.getTotalAmount(),
                 saved.getCurrency(),
                 saved.getStatus(),
-                saved.getCreatedAt()
-        );
+                saved.getCreatedAt());
     }
 
     public List<ReceiptResponse> listReceipts(String userEmail) {
@@ -153,8 +148,7 @@ public class ReceiptService {
                     r.getTotalAmount(),
                     r.getCurrency(),
                     r.getStatus(),
-                    r.getCreatedAt()
-            ));
+                    r.getCreatedAt()));
         }
         return out;
     }
@@ -181,8 +175,7 @@ public class ReceiptService {
                 r.getTotalAmount(),
                 r.getCurrency(),
                 r.getStatus(),
-                r.getCreatedAt()
-        );
+                r.getCreatedAt());
     }
 
     private void validateFile(MultipartFile file) {
@@ -194,8 +187,8 @@ public class ReceiptService {
         String name = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase(Locale.ROOT);
 
         boolean allowedByContentType = (ct != null && ALLOWED_CONTENT_TYPES.contains(ct));
-        boolean allowedByExtension =
-                name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".pdf");
+        boolean allowedByExtension = name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png")
+                || name.endsWith(".pdf");
 
         if (!allowedByContentType && !allowedByExtension) {
             throw new IllegalArgumentException("Invalid content-type. Allowed: image/jpeg, image/png, application/pdf");
@@ -213,12 +206,14 @@ public class ReceiptService {
     private String safeFileName(String name) {
         String trimmed = name.trim();
         trimmed = trimmed.replace("\\", "_").replace("/", "_");
-        if (trimmed.isBlank()) return "receipt";
+        if (trimmed.isBlank())
+            return "receipt";
         return trimmed;
     }
 
     private String blankToNull(String s) {
-        if (s == null) return null;
+        if (s == null)
+            return null;
         String t = s.trim();
         return t.isEmpty() ? null : t;
     }
@@ -232,75 +227,85 @@ public class ReceiptService {
         }
 
         String name = fileName.toLowerCase(Locale.ROOT);
-        if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
-        if (name.endsWith(".png")) return "image/png";
-        if (name.endsWith(".pdf")) return "application/pdf";
+        if (name.endsWith(".jpg") || name.endsWith(".jpeg"))
+            return "image/jpeg";
+        if (name.endsWith(".png"))
+            return "image/png";
+        if (name.endsWith(".pdf"))
+            return "application/pdf";
 
         return "application/octet-stream";
     }
-@Transactional
-public ReceiptEntity createReceipt(UUID userId, MultipartFile file) {
 
-    ReceiptEntity receipt = new ReceiptEntity();
-    receipt.setId(UUID.randomUUID());
-    receipt.setUserId(userId);
-    receipt.setStatus(ReceiptStatus.UPLOADED);
-    receipt.setContentType(file.getContentType());
-    receipt.setFileName(file.getOriginalFilename());
+    @Transactional
+    public ReceiptEntity createReceipt(UUID userId, MultipartFile file) {
 
-    String blobName = buildBlobName(userId, receipt.getId(), file.getOriginalFilename());
-    receipt.setBlobName(blobName);
+        ReceiptEntity receipt = new ReceiptEntity();
+        receipt.setId(UUID.randomUUID());
+        receipt.setUserId(userId);
+        receipt.setStatus(ReceiptStatus.UPLOADED);
+        receipt.setContentType(file.getContentType());
+        receipt.setFileName(file.getOriginalFilename());
 
-    receiptRepository.save(receipt);
+        String blobName = buildBlobName(userId, receipt.getId(), file.getOriginalFilename());
+        receipt.setBlobName(blobName);
 
-    String originalName = safeFileName(
-            java.util.Objects.requireNonNullElse(file.getOriginalFilename(), "receipt")
-    );
-    String normalizedType = normalizeContentType(file.getContentType(), originalName);
+        receiptRepository.save(receipt);
 
-    log.info("[{}] Blob name for receipt upload: {}",
-            RequestCorrelation.getRequestId(), blobName);
+        String originalName = safeFileName(
+                java.util.Objects.requireNonNullElse(file.getOriginalFilename(), "receipt"));
+        String normalizedType = normalizeContentType(file.getContentType(), originalName);
 
-    // Upload first
-    try (InputStream in = file.getInputStream()) {
-        blobStorageService.upload(blobName, in, file.getSize(), normalizedType);
-    } catch (Exception e) {
-        throw new IllegalStateException("Failed to upload receipt to storage", e);
-    }
+        log.info("[{}] Blob name for receipt upload: {}",
+                RequestCorrelation.getRequestId(), blobName);
 
-    // Enqueue next. If enqueue fails, delete blob to avoid orphan.
-    try {
-        queueService.enqueue(receipt.getId(), userId, blobName, normalizedType);
-    } catch (Exception e) {
-        // Best-effort cleanup (do not hide original error)
-        try {
-            blobStorageService.deleteIfExists(blobName);
-        } catch (Exception cleanupEx) {
-            log.warn("[{}] Failed to cleanup blob after enqueue failure blobName={} err={}",
-                    RequestCorrelation.getRequestId(), blobName, cleanupEx.getMessage());
+        // Upload first
+        try (InputStream in = file.getInputStream()) {
+            blobStorageService.upload(blobName, in, file.getSize(), normalizedType);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to upload receipt to storage", e);
         }
-        throw e;
+      
+              
+        // Enqueue next. If enqueue fails, delete blob to avoid orphan.
+        try {
+              log.info("[{}] BEFORE enqueue receiptId={} status={}",  RequestCorrelation.getRequestId(), receipt.getId(), receipt.getStatus());
+            queueService.enqueue(receipt.getId(), userId, blobName, normalizedType);
+            log.info("[{}] AFTER enqueue receiptId={}",        RequestCorrelation.getRequestId(), receipt.getId());
+        } catch (Exception e) {
+            // Best-effort cleanup (do not hide original error)
+            try {
+                blobStorageService.deleteIfExists(blobName);
+            } catch (Exception cleanupEx) {
+                log.warn("[{}] Failed to cleanup blob after enqueue failure blobName={} err={}",
+                        RequestCorrelation.getRequestId(), blobName, cleanupEx.getMessage());
+            }
+            throw e;
+        }
+
+        // Mark OCR_PENDING only after enqueue succeeds
+        receipt.setStatus(ReceiptStatus.OCR_PENDING);
+        receiptRepository.save(receipt);
+        log.info("[{}] AFTER status update receiptId={} status={}",
+        RequestCorrelation.getRequestId(), receipt.getId(), receipt.getStatus());
+
+        log.info("[{}] Receipt uploaded & OCR enqueued receiptId={} userId={} blobName={}",
+                RequestCorrelation.getRequestId(), receipt.getId(), userId, blobName);
+
+        return receipt;
     }
 
-    // Mark OCR_PENDING only after enqueue succeeds
-    receipt.setStatus(ReceiptStatus.OCR_PENDING);
-    receiptRepository.save(receipt);
-
-    log.info("[{}] Receipt uploaded & OCR enqueued receiptId={} userId={} blobName={}",
-            RequestCorrelation.getRequestId(), receipt.getId(), userId, blobName);
-
-    return receipt;
-}
-@SuppressWarnings("unused")
+    @SuppressWarnings("unused")
     private static String safeContentType(String ct) {
-        if (ct == null || ct.isBlank()) return "application/octet-stream";
+        if (ct == null || ct.isBlank())
+            return "application/octet-stream";
         return ct;
     }
 
     private String buildBlobName(UUID userId, UUID receiptId, String originalName) {
-        String safe = (originalName == null || originalName.isBlank()) ? "receipt" : originalName.replaceAll("[^a-zA-Z0-9._-]", "_");
+        String safe = (originalName == null || originalName.isBlank()) ? "receipt"
+                : originalName.replaceAll("[^a-zA-Z0-9._-]", "_");
         return "receipts/" + userId + "/" + receiptId + "/" + safe;
     }
 
-   
 }
