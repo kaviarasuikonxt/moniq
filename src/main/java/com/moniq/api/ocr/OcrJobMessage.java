@@ -1,9 +1,6 @@
 // src/main/java/com/moniq/api/ocr/OcrJobMessage.java
 package com.moniq.api.ocr;
 
-import com.fasterxml.jackson.annotation.JsonFormat;
-
-import java.time.OffsetDateTime;
 import java.util.UUID;
 
 public class OcrJobMessage {
@@ -12,8 +9,8 @@ public class OcrJobMessage {
     private String blobName;
     private String contentType;
 
-    @JsonFormat(shape = JsonFormat.Shape.STRING)
-    private OffsetDateTime createdAt;
+  
+    private String createdAt;
 
     public UUID getReceiptId() { return receiptId; }
     public void setReceiptId(UUID receiptId) { this.receiptId = receiptId; }
@@ -27,6 +24,8 @@ public class OcrJobMessage {
     public String getContentType() { return contentType; }
     public void setContentType(String contentType) { this.contentType = contentType; }
 
-    public OffsetDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; }
+    public String getCreatedAt() { return createdAt; }
+        public void setCreatedAt(String createdAt) {
+        this.createdAt = createdAt;
+    }
 }

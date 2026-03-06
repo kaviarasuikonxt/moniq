@@ -1,15 +1,15 @@
 // src/main/java/com/moniq/api/ocr/ReceiptOcrQueueService.java
 package com.moniq.api.ocr;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.moniq.api.web.RequestCorrelation;
-import com.azure.storage.queue.QueueClient;
+import java.util.UUID;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.time.OffsetDateTime;
-import java.util.UUID;
+import com.azure.storage.queue.QueueClient;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.moniq.api.web.RequestCorrelation;
 
 @Service
 public class ReceiptOcrQueueService {
@@ -30,7 +30,7 @@ public class ReceiptOcrQueueService {
             msg.setUserId(userId);
             msg.setBlobName(blobName);
             msg.setContentType(contentType);
-            msg.setCreatedAt(OffsetDateTime.now());
+            msg.setCreatedAt(java.time.OffsetDateTime.now().toString());
 
             String payload = objectMapper.writeValueAsString(msg);
 
