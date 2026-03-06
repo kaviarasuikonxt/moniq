@@ -17,6 +17,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+
 
 @RestController
 @RequestMapping("/api/receipts")
@@ -122,22 +125,75 @@ public class ReceiptItemsController {
             throw new IllegalStateException("Unauthenticated");
         }
 
+        // 1) If auth name is UUID (your custom token might do this)
         try {
             return UUID.fromString(auth.getName());
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
 
+        // 2) If using Spring Resource Server JWT
+        if (auth instanceof JwtAuthenticationToken jat) {
+            Jwt jwt = jat.getToken();
+
+            // Try common claim keys
+            String userId = firstNonBlank(
+                    jwt.getClaimAsString("userId"),
+                    jwt.getClaimAsString("uid"),
+                    jwt.getSubject() // sometimes you store UUID in sub
+            );
+
+            if (userId != null) {
+                try {
+                    return UUID.fromString(userId);
+                } catch (Exception ignored) {
+                }
+            }
+        }
+
+        // 3) If principal itself is Jwt
         Object principal = auth.getPrincipal();
+        if (principal instanceof Jwt jwt) {
+            String userId = firstNonBlank(
+                    jwt.getClaimAsString("userId"),
+                    jwt.getClaimAsString("uid"),
+                    jwt.getSubject());
+
+            if (userId != null) {
+                try {
+                    return UUID.fromString(userId);
+                } catch (Exception ignored) {
+                }
+            }
+        }
+
+        // 4) Fallback: Map principal
         if (principal instanceof Map<?, ?> map) {
             Object userId = map.get("userId");
             if (userId != null) {
-                try { return UUID.fromString(String.valueOf(userId)); } catch (Exception ignored) {}
+                try {
+                    return UUID.fromString(String.valueOf(userId));
+                } catch (Exception ignored) {
+                }
             }
             Object sub = map.get("sub");
             if (sub != null) {
-                try { return UUID.fromString(String.valueOf(sub)); } catch (Exception ignored) {}
+                try {
+                    return UUID.fromString(String.valueOf(sub));
+                } catch (Exception ignored) {
+                }
             }
         }
 
         throw new IllegalStateException("Cannot resolve userId from authentication");
+    }
+
+    private static String firstNonBlank(String... vals) {
+        if (vals == null)
+            return null;
+        for (String v : vals) {
+            if (v != null && !v.isBlank())
+                return v;
+        }
+        return null;
     }
 }

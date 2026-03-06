@@ -23,4 +23,9 @@ public class HealthController {
     return "JWT token:\n\n" + token + "\n";
      }
 
+      @GetMapping(value = "/", produces = MediaType.TEXT_PLAIN_VALUE)
+    public String root() {
+        return "Moniq API is running. Try /ping";
+    }
+
 }
