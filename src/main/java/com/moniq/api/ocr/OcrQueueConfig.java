@@ -1,28 +1,23 @@
 // src/main/java/com/moniq/api/ocr/OcrQueueConfig.java
 package com.moniq.api.ocr;
 
-import com.azure.storage.queue.QueueClient;
-import com.azure.storage.queue.QueueClientBuilder;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import static java.util.Objects.requireNonNull;
+import com.azure.storage.queue.QueueClient;
+import com.azure.storage.queue.QueueClientBuilder;
+import com.moniq.api.storage.StorageProperties;
 
 @Configuration
 public class OcrQueueConfig {
 
     @Bean
-    public QueueClient receiptOcrQueueClient(
-            @Value("${azure.storage.connection-string}") String connectionString,
-            @Value("${azure.storage.queue.receipt-ocr:receipt-ocr}") String queueName
-    ) {
-        requireNonNull(connectionString, "azure.storage.connection-string is required");
-        requireNonNull(queueName, "azure.storage.queue.receipt-ocr is required");
-
+    @ConditionalOnProperty(prefix = "storage", name = "connection-string")
+public QueueClient receiptOcrQueueClient(StorageProperties props) {
         return new QueueClientBuilder()
-            .connectionString(connectionString)
-            .queueName(queueName)
-            .buildClient();
+                .connectionString(props.getConnectionString())
+                .queueName(props.getQueueReceiptOcr())
+                .buildClient();
     }
 }

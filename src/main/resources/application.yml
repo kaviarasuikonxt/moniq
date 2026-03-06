@@ -77,15 +77,17 @@ app:
             scope: openid,profile,email
 
 logging:
-  file:
-    name: "" # disables file logging (console only)
-azure:
-  storage:
-    connection-string: ${AZURE_STORAGE_CONNECTION_STRING:}
-    container-receipts: ${AZURE_STORAGE_CONTAINER_RECEIPTS:receipts}
-    queue:
-      receipt-ocr: ${AZURE_STORAGE_QUEUE_RECEIPT_OCR:receipt-ocr}
+  level:
+    root: INFO
+    com.moniq.api: DEBUG
+    org.springframework.web: DEBUG
+    org.springframework.web.multipart: DEBUG
 
+storage:
+  connection-string: ${AZURE_STORAGE_CONNECTION_STRING:}
+  container-receipts: ${AZURE_STORAGE_CONTAINER_RECEIPTS:receipts}
+  queue-receipt-ocr: ${AZURE_STORAGE_QUEUE_RECEIPT_OCR:receipt-ocr}
+azure:
   vision:
     endpoint: ${AZURE_VISION_ENDPOINT:}
     key: ${AZURE_VISION_KEY:}

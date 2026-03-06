@@ -34,6 +34,11 @@ public class BlobStorageService {
 
     public void upload(String blobName, InputStream data, long length, String contentType) {
         BlobContainerClient receiptsContainer = ensureConfigured();
+        try {
+        receiptsContainer.createIfNotExists();
+    } catch (Exception e) {
+        log.warn("Unable to create container if not exists (will continue): {}", e.getMessage());
+    }
         BlobClient blobClient = receiptsContainer.getBlobClient(blobName);
         blobClient.upload(data, length, true);
         blobClient.setHttpHeaders(new BlobHttpHeaders().setContentType(contentType));
