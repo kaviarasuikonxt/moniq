@@ -7,6 +7,9 @@ import com.moniq.api.ocr.entity.ReceiptOcrResultEntity;
 import com.moniq.api.receipt.ReceiptEntity;
 import com.moniq.api.receipt.ReceiptRepository;
 import com.moniq.api.receipt.dto.*;
+import com.moniq.api.repository.UserRepository;
+import com.moniq.api.security.CurrentUserIdResolver;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -25,14 +28,121 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 @RequestMapping("/api/receipts")
 public class ReceiptItemsController {
 
+
+
+    private final ReceiptRepository receiptRepository;
+    private final OcrService ocrService;
+    private final CurrentUserIdResolver currentUserIdResolver;
+
+    public ReceiptItemsController(ReceiptRepository receiptRepository,
+                                  OcrService ocrService,
+                                  CurrentUserIdResolver currentUserIdResolver) {
+        this.receiptRepository = receiptRepository;
+        this.ocrService = ocrService;
+        this.currentUserIdResolver = currentUserIdResolver;
+    }
+
+    @GetMapping("/{id}/items")
+    public ResponseEntity<?> getReceiptItems(@PathVariable("id") UUID receiptId) {
+
+        ReceiptEntity receipt = receiptRepository.findById(receiptId).orElse(null);
+        if (receipt == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error("NOT_FOUND", "Receipt not found"));
+        }
+
+        UUID currentUserId = currentUserIdResolver.resolveCurrentUserId().orElse(null);
+        if (currentUserId == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error("UNAUTHORIZED", "Unauthenticated"));
+        }
+
+        if (!currentUserId.equals(receipt.getUserId())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("FORBIDDEN", "Access denied"));
+        }
+
+        ReceiptItemsResponse resp = new ReceiptItemsResponse();
+        resp.receiptId = receiptId;
+        resp.status = String.valueOf(receipt.getStatus());
+
+        // Day 8 rule: if not OCR_COMPLETED, return empty list (HTTP 200)
+        if (!"OCR_COMPLETED".equalsIgnoreCase(String.valueOf(receipt.getStatus()))) {
+            return ResponseEntity.ok(resp);
+        }
+
+        List<ReceiptItemEntity> items = ocrService.getItems(receiptId);
+        for (ReceiptItemEntity it : items) {
+            ReceiptItemResponse r = new ReceiptItemResponse();
+            r.id = it.getId();
+            r.lineNo = it.getLineNo();
+            r.rawLine = it.getRawLine();
+            r.itemName = it.getItemName();
+            r.quantity = it.getQuantity();
+            r.unitPrice = it.getUnitPrice();
+            r.amount = it.getAmount();
+            r.currency = it.getCurrency();
+            r.category = it.getCategory();
+            r.confidence = it.getConfidence();
+            resp.items.add(r);
+        }
+
+        return ResponseEntity.ok(resp);
+    }
+
+    @GetMapping("/{id}/ocr")
+    public ResponseEntity<?> getReceiptOcr(@PathVariable("id") UUID receiptId) {
+
+        ReceiptEntity receipt = receiptRepository.findById(receiptId).orElse(null);
+        if (receipt == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error("NOT_FOUND", "Receipt not found"));
+        }
+
+        UUID currentUserId = currentUserIdResolver.resolveCurrentUserId().orElse(null);
+        if (currentUserId == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error("UNAUTHORIZED", "Unauthenticated"));
+        }
+
+        if (!currentUserId.equals(receipt.getUserId())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("FORBIDDEN", "Access denied"));
+        }
+
+        ReceiptOcrResultEntity ocr = ocrService.getOcrResult(receiptId).orElse(null);
+        if (ocr == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error("NOT_FOUND", "OCR result not found"));
+        }
+
+        ReceiptOcrResponse resp = new ReceiptOcrResponse();
+        resp.receiptId = receiptId;
+        resp.provider = ocr.getProvider();
+        resp.rawText = ocr.getRawText();
+        resp.createdAt = ocr.getCreatedAt();
+
+        return ResponseEntity.ok(resp);
+    }
+
+    private Map<String, Object> error(String code, String message) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("code", code);
+        m.put("message", message);
+        return m;
+    }
+
+
+
+/*
     private final ReceiptRepository receiptRepository;
     private final OcrService ocrService;
 
-    public ReceiptItemsController(ReceiptRepository receiptRepository, OcrService ocrService) {
+    private final UserRepository userRepository;
+
+public ReceiptItemsController(ReceiptRepository receiptRepository, OcrService ocrService, UserRepository userRepository) {
+    this.receiptRepository = receiptRepository;
+    this.ocrService = ocrService;
+    this.userRepository = userRepository;
+}
+   /*  public ReceiptItemsController(ReceiptRepository receiptRepository, OcrService ocrService) {
         this.receiptRepository = receiptRepository;
         this.ocrService = ocrService;
-    }
-
+    }*/
+/*
     @GetMapping("/{id}/items")
     public ResponseEntity<?> getReceiptItems(@PathVariable("id") UUID receiptId) {
 
@@ -106,12 +216,13 @@ public class ReceiptItemsController {
      * If your GlobalAuthExceptionHandler expects a specific format,
      * we can replace this later with your real DTO once you share it.
      */
+    /* 
     private Map<String, Object> error(String code, String message) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("code", code);
         m.put("message", message);
         return m;
-    }
+    }*/
 
     /**
      * IMPORTANT: This must match your existing JWT authentication principal.
@@ -119,6 +230,9 @@ public class ReceiptItemsController {
      * - auth.getName() == userId UUID
      * - principal Map contains "userId" or "sub"
      */
+
+/* 
+
     private UUID currentUserIdOrThrow() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !auth.isAuthenticated()) {
@@ -196,4 +310,9 @@ public class ReceiptItemsController {
         }
         return null;
     }
+    */
+
+
+
+
 }
