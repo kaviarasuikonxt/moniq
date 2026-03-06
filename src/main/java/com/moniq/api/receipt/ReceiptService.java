@@ -263,15 +263,20 @@ public class ReceiptService {
         try (InputStream in = file.getInputStream()) {
             blobStorageService.upload(blobName, in, file.getSize(), normalizedType);
         } catch (Exception e) {
+            log.error("[{}] Blob upload failed receiptId={} blobName={}",
+                    RequestCorrelation.getRequestId(), receipt.getId(), blobName, e);
             throw new IllegalStateException("Failed to upload receipt to storage", e);
         }
-      
-              
+
+        log.info("[{}] BEFORE enqueue receiptId={} status={}",
+                RequestCorrelation.getRequestId(), receipt.getId(), receipt.getStatus());
+
         // Enqueue next. If enqueue fails, delete blob to avoid orphan.
         try {
-              log.info("[{}] BEFORE enqueue receiptId={} status={}",  RequestCorrelation.getRequestId(), receipt.getId(), receipt.getStatus());
+            // log.info("[{}] BEFORE enqueue receiptId={} status={}",
+            // RequestCorrelation.getRequestId(), receipt.getId(), receipt.getStatus());
             queueService.enqueue(receipt.getId(), userId, blobName, normalizedType);
-            log.info("[{}] AFTER enqueue receiptId={}",        RequestCorrelation.getRequestId(), receipt.getId());
+            log.info("[{}] AFTER enqueue receiptId={}", RequestCorrelation.getRequestId(), receipt.getId());
         } catch (Exception e) {
             // Best-effort cleanup (do not hide original error)
             try {
@@ -280,14 +285,18 @@ public class ReceiptService {
                 log.warn("[{}] Failed to cleanup blob after enqueue failure blobName={} err={}",
                         RequestCorrelation.getRequestId(), blobName, cleanupEx.getMessage());
             }
+            log.error("[{}] OCR enqueue failed receiptId={} userId={} blobName={}",
+                    RequestCorrelation.getRequestId(), receipt.getId(), userId, blobName, e);
+
             throw e;
         }
-
+        log.info("[{}] AFTER enqueue receiptId={}",
+                RequestCorrelation.getRequestId(), receipt.getId());
         // Mark OCR_PENDING only after enqueue succeeds
         receipt.setStatus(ReceiptStatus.OCR_PENDING);
         receiptRepository.save(receipt);
         log.info("[{}] AFTER status update receiptId={} status={}",
-        RequestCorrelation.getRequestId(), receipt.getId(), receipt.getStatus());
+                RequestCorrelation.getRequestId(), receipt.getId(), receipt.getStatus());
 
         log.info("[{}] Receipt uploaded & OCR enqueued receiptId={} userId={} blobName={}",
                 RequestCorrelation.getRequestId(), receipt.getId(), userId, blobName);
@@ -308,4 +317,27 @@ public class ReceiptService {
         return "receipts/" + userId + "/" + receiptId + "/" + safe;
     }
 
+    public ReceiptResponse getReceiptById(UUID id) {
+    ReceiptEntity receipt = receiptRepository.findById(id)
+            .orElseThrow(() -> new IllegalArgumentException("Receipt not found"));
+    return toResponse(receipt);
+}
+
+private ReceiptResponse toResponse(ReceiptEntity receipt) {
+  String fileUrl = blobStorageService.resolveFileUrl(receipt.getBlobName());
+
+    return ReceiptResponse.of(
+            receipt.getId(),
+            fileUrl,
+            receipt.getFileName(),
+            receipt.getContentType(),
+            receipt.getFileSizeBytes(),
+            receipt.getMerchant(),
+            receipt.getReceiptDate(),
+            receipt.getTotalAmount(),
+            receipt.getCurrency(),
+            receipt.getStatus(),
+            receipt.getCreatedAt()
+    );
+}
 }
