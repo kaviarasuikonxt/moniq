@@ -139,7 +139,7 @@ public class OcrService {
         for (ReceiptItemEntity item : items) {
             CategorizationResult r = categorizer.categorize(item.getItemName(), item.getRawLine());
             item.setCategory(r.getCategory());
-            item.setConfidence(BigDecimal.valueOf(r.getConfidence()).setScale(2, java.math.RoundingMode.HALF_UP));
+            item.setConfidence(r.getConfidence().setScale(2, java.math.RoundingMode.HALF_UP));
         }
         return items;
     }

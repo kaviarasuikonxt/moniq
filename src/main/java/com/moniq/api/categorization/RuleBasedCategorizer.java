@@ -3,6 +3,7 @@ package com.moniq.api.categorization;
 
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.util.*;
 
 @Component
@@ -24,7 +25,7 @@ public class RuleBasedCategorizer implements AiCategorizer {
     @Override
     public CategorizationResult categorize(String itemName, String rawLine) {
         String text = ((itemName != null && !itemName.isBlank()) ? itemName : rawLine);
-        if (text == null) return new CategorizationResult("OTHER", 0.10);
+        if (text == null) return new CategorizationResult("OTHER", new BigDecimal("0.30"));
 
         String t = text.toLowerCase(Locale.ROOT);
 
@@ -42,7 +43,7 @@ public class RuleBasedCategorizer implements AiCategorizer {
             }
         }
 
-        if (bestScore <= 0) return new CategorizationResult("OTHER", 0.15);
+        if (bestScore <= 0) return new CategorizationResult("OTHER", new BigDecimal("0.30"));
 
         // Simple confidence curve: 1 match => 0.60, 2 => 0.75, 3 => 0.85, >=4 => 0.92
         double confidence = switch (bestScore) {
@@ -51,6 +52,6 @@ public class RuleBasedCategorizer implements AiCategorizer {
             case 3 -> 0.85;
             default -> 0.92;
         };
-        return new CategorizationResult(bestCategory, confidence);
+        return new CategorizationResult(bestCategory, new BigDecimal(String.valueOf(confidence)));
     }
 }
