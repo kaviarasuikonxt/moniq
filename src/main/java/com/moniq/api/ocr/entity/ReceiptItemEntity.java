@@ -59,6 +59,12 @@ public class ReceiptItemEntity {
         if (id == null) id = UUID.randomUUID();
         if (createdAt == null) createdAt = OffsetDateTime.now();
         if (currency == null) currency = "SGD";
+        if (category == null || category.isBlank()) {
+    category = "OTHER";
+}
+if (confidence == null) {
+    confidence = new BigDecimal("0.30");
+}
     }
 
     public UUID getId() { return id; }
