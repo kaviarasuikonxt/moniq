@@ -173,7 +173,8 @@ public class OcrService {
                             .setScale(2, java.math.RoundingMode.HALF_UP)
             );
         }
-
+      
+        
         return items;
     }
 }
