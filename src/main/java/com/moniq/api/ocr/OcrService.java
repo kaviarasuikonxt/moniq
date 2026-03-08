@@ -16,6 +16,11 @@ import com.moniq.api.categorization.AiCategorizer;
 import com.moniq.api.categorization.CategorizationResult;
 import com.moniq.api.ocr.entity.ReceiptItemEntity;
 import com.moniq.api.ocr.entity.ReceiptOcrResultEntity;
+import com.moniq.api.ocr.layout.AzureOcrLayoutParser;
+import com.moniq.api.ocr.layout.OcrLayoutDocument;
+import com.moniq.api.ocr.layout.OcrLineRowGrouper;
+import com.moniq.api.ocr.layout.OcrRow;
+import com.moniq.api.ocr.layout.OcrRowTextComposer;
 import com.moniq.api.ocr.repository.ReceiptItemRepository;
 import com.moniq.api.ocr.repository.ReceiptOcrResultRepository;
 import com.moniq.api.parsing.ReceiptItemParser;
@@ -33,6 +38,9 @@ public class OcrService {
     private final ReceiptItemRepository itemRepo;
     private final AiCategorizer categorizer;
     private final ReceiptItemParser itemParser;
+    private final AzureOcrLayoutParser azureOcrLayoutParser;
+    private final OcrLineRowGrouper ocrLineRowGrouper;
+    private final OcrRowTextComposer ocrRowTextComposer;
 
     @SuppressWarnings("unused")
     private final boolean aiEnabled;
@@ -45,6 +53,9 @@ public class OcrService {
             ReceiptLineFilterService lineFilter,
             ReceiptLineNormalizer lineNormalizer,
             ReceiptItemParser itemParser,
+            AzureOcrLayoutParser azureOcrLayoutParser,
+            OcrLineRowGrouper ocrLineRowGrouper,
+            OcrRowTextComposer ocrRowTextComposer,
             @Value("${app.ai.enabled:false}") boolean aiEnabled
     ) {
         this.ocrProvider = ocrProvider;
@@ -52,6 +63,9 @@ public class OcrService {
         this.itemRepo = itemRepo;
         this.categorizer = categorizer;
         this.itemParser = itemParser;
+        this.azureOcrLayoutParser = azureOcrLayoutParser;
+        this.ocrLineRowGrouper = ocrLineRowGrouper;
+        this.ocrRowTextComposer = ocrRowTextComposer;
         this.aiEnabled = aiEnabled;
     }
 
@@ -91,7 +105,9 @@ public class OcrService {
 
         itemRepo.deleteByReceiptId(receiptId);
 
-        List<ReceiptItemEntity> items = extractItems(receiptId, entity.getRawText());
+        String parserInputText = buildParserInputText(receiptId, entity);
+
+        List<ReceiptItemEntity> items = extractItems(receiptId, parserInputText);
         items = categorize(items);
         itemRepo.saveAll(items);
 
@@ -109,17 +125,64 @@ public class OcrService {
         return itemRepo.findByReceiptIdOrderByLineNoAsc(receiptId);
     }
 
-    private List<ReceiptItemEntity> extractItems(UUID receiptId, String rawText) {
-        if (rawText == null || rawText.isBlank()) {
-            log.warn("[{}] OCR parsing skipped receiptId={} reason=empty_raw_text",
+    private String buildParserInputText(UUID receiptId, ReceiptOcrResultEntity entity) {
+        String requestId = RequestCorrelation.getRequestId();
+        String normalizedJson = entity.getNormalizedJson();
+
+        if (normalizedJson == null || normalizedJson.isBlank() || "{}".equals(normalizedJson.trim())) {
+            log.info("[{}] OCR parser input fallback receiptId={} reason=no_normalized_json",
+                    requestId, receiptId);
+            return entity.getRawText();
+        }
+
+        try {
+            OcrLayoutDocument document = azureOcrLayoutParser.parse(normalizedJson);
+            if (document == null || !document.hasPages()) {
+                log.warn("[{}] OCR layout parse returned empty document receiptId={} fallback=raw_text",
+                        requestId, receiptId);
+                return entity.getRawText();
+            }
+
+            List<OcrRow> rows = ocrLineRowGrouper.groupDocument(document);
+            if (rows == null || rows.isEmpty()) {
+                log.warn("[{}] OCR row grouping returned empty rows receiptId={} fallback=raw_text",
+                        requestId, receiptId);
+                return entity.getRawText();
+            }
+
+            String layoutText = ocrRowTextComposer.composeDocumentText(rows);
+            if (layoutText == null || layoutText.isBlank()) {
+                log.warn("[{}] OCR layout text compose returned blank receiptId={} fallback=raw_text",
+                        requestId, receiptId);
+                return entity.getRawText();
+            }
+
+            log.info("[{}] OCR layout-first parser input selected receiptId={} rows={} layoutTextLength={} rawTextLength={}",
+                    requestId,
+                    receiptId,
+                    rows.size(),
+                    layoutText.length(),
+                    entity.getRawText() == null ? 0 : entity.getRawText().length());
+
+            return layoutText;
+        } catch (Exception ex) {
+            log.error("[{}] OCR layout-first parser input failed receiptId={} fallback=raw_text",
+                    requestId, receiptId, ex);
+            return entity.getRawText();
+        }
+    }
+
+    private List<ReceiptItemEntity> extractItems(UUID receiptId, String parserInputText) {
+        if (parserInputText == null || parserInputText.isBlank()) {
+            log.warn("[{}] OCR parsing skipped receiptId={} reason=empty_parser_input",
                     RequestCorrelation.getRequestId(), receiptId);
             return List.of();
         }
 
-        log.info("[{}] OCR parsing started receiptId={} textLength={}",
-                RequestCorrelation.getRequestId(), receiptId, rawText.length());
+        log.info("[{}] OCR parsing started receiptId={} parserInputLength={}",
+                RequestCorrelation.getRequestId(), receiptId, parserInputText.length());
 
-        List<ReceiptItemParser.ParsedItem> parsedItems = itemParser.parseReceipt(rawText);
+        List<ReceiptItemParser.ParsedItem> parsedItems = itemParser.parseReceipt(parserInputText);
 
         List<ReceiptItemEntity> items = new ArrayList<>();
         int lineNo = 1;
