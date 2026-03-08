@@ -38,9 +38,10 @@ public class OcrService {
     private final ReceiptItemRepository itemRepo;
     private final AiCategorizer categorizer;
     private final ReceiptItemParser itemParser;
+
     private final AzureOcrLayoutParser azureOcrLayoutParser;
-    private final OcrLineRowGrouper ocrLineRowGrouper;
-    private final OcrRowTextComposer ocrRowTextComposer;
+    private final OcrLineRowGrouper rowGrouper;
+    private final OcrRowTextComposer rowComposer;
 
     @SuppressWarnings("unused")
     private final boolean aiEnabled;
@@ -54,8 +55,8 @@ public class OcrService {
             ReceiptLineNormalizer lineNormalizer,
             ReceiptItemParser itemParser,
             AzureOcrLayoutParser azureOcrLayoutParser,
-            OcrLineRowGrouper ocrLineRowGrouper,
-            OcrRowTextComposer ocrRowTextComposer,
+            OcrLineRowGrouper rowGrouper,
+            OcrRowTextComposer rowComposer,
             @Value("${app.ai.enabled:false}") boolean aiEnabled
     ) {
         this.ocrProvider = ocrProvider;
@@ -64,16 +65,17 @@ public class OcrService {
         this.categorizer = categorizer;
         this.itemParser = itemParser;
         this.azureOcrLayoutParser = azureOcrLayoutParser;
-        this.ocrLineRowGrouper = ocrLineRowGrouper;
-        this.ocrRowTextComposer = ocrRowTextComposer;
+        this.rowGrouper = rowGrouper;
+        this.rowComposer = rowComposer;
         this.aiEnabled = aiEnabled;
     }
 
     public OcrProviderResult runOcrAndPersist(UUID receiptId, InputStream blobStream, String contentType) {
+
         String requestId = RequestCorrelation.getRequestId();
 
-        log.info("[{}] OCR processing started receiptId={} provider={} contentType={}",
-                requestId, receiptId, ocrProvider.providerName(), safeContentType(contentType));
+        log.info("[{}] OCR processing started receiptId={} provider={}",
+                requestId, receiptId, ocrProvider.providerName());
 
         OcrProviderResult result = ocrProvider.read(blobStream, contentType);
 
@@ -82,39 +84,182 @@ public class OcrService {
 
         entity.setReceiptId(receiptId);
         entity.setRawText(result.getRawText());
-
-        String normalizedJson = result.getNormalizedJson();
-        if (normalizedJson == null || normalizedJson.isBlank()) {
-            log.warn("[{}] OCR normalizedJson missing receiptId={} provider={}",
-                    requestId, receiptId, ocrProvider.providerName());
-            normalizedJson = "{}";
-        }
-
-        entity.setNormalizedJson(normalizedJson);
+        entity.setNormalizedJson(result.getNormalizedJson());
         entity.setProvider(ocrProvider.providerName());
         entity.setCreatedAt(OffsetDateTime.now());
 
         ocrRepo.save(entity);
 
-        log.info("[{}] OCR persisted receiptId={} provider={} rawTextLength={} normalizedJsonLength={}",
+        log.info("[{}] OCR persisted receiptId={} rawTextLength={} jsonLength={}",
                 requestId,
                 receiptId,
-                entity.getProvider(),
-                entity.getRawText() == null ? 0 : entity.getRawText().length(),
-                entity.getNormalizedJson() == null ? 0 : entity.getNormalizedJson().length());
+                entity.getRawText().length(),
+                entity.getNormalizedJson().length());
 
         itemRepo.deleteByReceiptId(receiptId);
 
-        String parserInputText = buildParserInputText(receiptId, entity);
+        List<ReceiptItemEntity> rawItems = extractItems(receiptId, entity.getRawText());
 
-        List<ReceiptItemEntity> items = extractItems(receiptId, parserInputText);
-        items = categorize(items);
-        itemRepo.saveAll(items);
+        String layoutText = buildLayoutText(entity.getNormalizedJson());
 
-        log.info("[{}] Items extracted receiptId={} items={}",
-                requestId, receiptId, items.size());
+        List<ReceiptItemEntity> layoutItems = extractItems(receiptId, layoutText);
+
+        List<ReceiptItemEntity> selected = selectBetterResult(rawItems, layoutItems);
+
+        selected = categorize(selected);
+
+        itemRepo.saveAll(selected);
+
+        log.info("[{}] Final OCR items selected receiptId={} items={}",
+                requestId, receiptId, selected.size());
 
         return result;
+    }
+
+    private String buildLayoutText(String normalizedJson) {
+
+        String requestId = RequestCorrelation.getRequestId();
+
+        if (normalizedJson == null || normalizedJson.isBlank() || "{}".equals(normalizedJson.trim())) {
+            return "";
+        }
+
+        try {
+
+            OcrLayoutDocument document = azureOcrLayoutParser.parse(normalizedJson);
+
+            if (document == null || !document.hasPages()) {
+                return "";
+            }
+
+            List<OcrRow> rows = rowGrouper.groupDocument(document);
+
+            if (rows == null || rows.isEmpty()) {
+                return "";
+            }
+
+            String text = rowComposer.composeDocumentText(rows);
+
+            log.info("[{}] Layout reconstruction rows={} length={}",
+                    requestId, rows.size(), text.length());
+
+            return text;
+
+        } catch (Exception ex) {
+
+            log.warn("[{}] Layout parsing failed fallback rawText", requestId, ex);
+
+            return "";
+        }
+    }
+
+    private List<ReceiptItemEntity> extractItems(UUID receiptId, String text) {
+
+        if (text == null || text.isBlank()) {
+            return List.of();
+        }
+
+        List<ReceiptItemParser.ParsedItem> parsed = itemParser.parseReceipt(text);
+
+        List<ReceiptItemEntity> items = new ArrayList<>();
+
+        int lineNo = 1;
+
+        for (ReceiptItemParser.ParsedItem p : parsed) {
+
+            if (p.getAmount() == null ||
+                    p.getAmount().compareTo(java.math.BigDecimal.ZERO) <= 0) {
+                continue;
+            }
+
+            ReceiptItemEntity item = new ReceiptItemEntity();
+
+            item.setId(UUID.randomUUID());
+            item.setReceiptId(receiptId);
+            item.setLineNo(lineNo++);
+            item.setRawLine(p.getRawLine());
+            item.setItemName(p.getItemName());
+            item.setQuantity(p.getQuantity());
+            item.setUnitPrice(p.getUnitPrice());
+            item.setAmount(p.getAmount());
+            item.setCurrency("SGD");
+            item.setCreatedAt(OffsetDateTime.now());
+
+            items.add(item);
+        }
+
+        return items;
+    }
+
+    private List<ReceiptItemEntity> selectBetterResult(
+            List<ReceiptItemEntity> raw,
+            List<ReceiptItemEntity> layout) {
+
+        String requestId = RequestCorrelation.getRequestId();
+
+        int rawScore = score(raw);
+        int layoutScore = score(layout);
+
+        log.info("[{}] OCR scoring rawScore={} layoutScore={}",
+                requestId, rawScore, layoutScore);
+
+        if (layoutScore > rawScore) {
+            log.info("[{}] Layout parsing selected", requestId);
+            return layout;
+        }
+
+        log.info("[{}] Raw text parsing selected", requestId);
+        return raw;
+    }
+
+    private int score(List<ReceiptItemEntity> items) {
+
+        if (items == null) return 0;
+
+        int score = 0;
+
+        for (ReceiptItemEntity i : items) {
+
+            if (i.getAmount() != null &&
+                    i.getAmount().compareTo(java.math.BigDecimal.ZERO) > 0) {
+                score += 3;
+            }
+
+            if (i.getItemName() != null &&
+                    i.getItemName().length() > 2) {
+                score += 1;
+            }
+
+            if (i.getQuantity() != null) {
+                score += 1;
+            }
+        }
+
+        return score;
+    }
+
+    private List<ReceiptItemEntity> categorize(List<ReceiptItemEntity> items) {
+
+        if (items.isEmpty()) {
+            return items;
+        }
+
+        for (ReceiptItemEntity item : items) {
+
+            CategorizationResult r = categorizer.categorize(
+                    item.getItemName(),
+                    item.getRawLine()
+            );
+
+            item.setCategory(r.getCategory());
+
+            item.setConfidence(
+                    r.getConfidence()
+                            .setScale(2, java.math.RoundingMode.HALF_UP)
+            );
+        }
+
+        return items;
     }
 
     public Optional<ReceiptOcrResultEntity> getOcrResult(UUID receiptId) {
@@ -123,121 +268,5 @@ public class OcrService {
 
     public List<ReceiptItemEntity> getItems(UUID receiptId) {
         return itemRepo.findByReceiptIdOrderByLineNoAsc(receiptId);
-    }
-
-    private String buildParserInputText(UUID receiptId, ReceiptOcrResultEntity entity) {
-        String requestId = RequestCorrelation.getRequestId();
-        String normalizedJson = entity.getNormalizedJson();
-
-        if (normalizedJson == null || normalizedJson.isBlank() || "{}".equals(normalizedJson.trim())) {
-            log.info("[{}] OCR parser input fallback receiptId={} reason=no_normalized_json",
-                    requestId, receiptId);
-            return entity.getRawText();
-        }
-
-        try {
-            OcrLayoutDocument document = azureOcrLayoutParser.parse(normalizedJson);
-            if (document == null || !document.hasPages()) {
-                log.warn("[{}] OCR layout parse returned empty document receiptId={} fallback=raw_text",
-                        requestId, receiptId);
-                return entity.getRawText();
-            }
-
-            List<OcrRow> rows = ocrLineRowGrouper.groupDocument(document);
-            if (rows == null || rows.isEmpty()) {
-                log.warn("[{}] OCR row grouping returned empty rows receiptId={} fallback=raw_text",
-                        requestId, receiptId);
-                return entity.getRawText();
-            }
-
-            String layoutText = ocrRowTextComposer.composeDocumentText(rows);
-            if (layoutText == null || layoutText.isBlank()) {
-                log.warn("[{}] OCR layout text compose returned blank receiptId={} fallback=raw_text",
-                        requestId, receiptId);
-                return entity.getRawText();
-            }
-
-            log.info("[{}] OCR layout-first parser input selected receiptId={} rows={} layoutTextLength={} rawTextLength={}",
-                    requestId,
-                    receiptId,
-                    rows.size(),
-                    layoutText.length(),
-                    entity.getRawText() == null ? 0 : entity.getRawText().length());
-
-            return layoutText;
-        } catch (Exception ex) {
-            log.error("[{}] OCR layout-first parser input failed receiptId={} fallback=raw_text",
-                    requestId, receiptId, ex);
-            return entity.getRawText();
-        }
-    }
-
-    private List<ReceiptItemEntity> extractItems(UUID receiptId, String parserInputText) {
-        if (parserInputText == null || parserInputText.isBlank()) {
-            log.warn("[{}] OCR parsing skipped receiptId={} reason=empty_parser_input",
-                    RequestCorrelation.getRequestId(), receiptId);
-            return List.of();
-        }
-
-        log.info("[{}] OCR parsing started receiptId={} parserInputLength={}",
-                RequestCorrelation.getRequestId(), receiptId, parserInputText.length());
-
-        List<ReceiptItemParser.ParsedItem> parsedItems = itemParser.parseReceipt(parserInputText);
-
-        List<ReceiptItemEntity> items = new ArrayList<>();
-        int lineNo = 1;
-
-        for (ReceiptItemParser.ParsedItem parsed : parsedItems) {
-            if (parsed.getAmount() == null ||
-                    parsed.getAmount().compareTo(java.math.BigDecimal.ZERO) <= 0) {
-                continue;
-            }
-
-            ReceiptItemEntity item = new ReceiptItemEntity();
-            item.setId(UUID.randomUUID());
-            item.setReceiptId(receiptId);
-            item.setLineNo(lineNo++);
-            item.setRawLine(parsed.getRawLine());
-            item.setItemName(parsed.getItemName());
-            item.setQuantity(parsed.getQuantity());
-            item.setUnitPrice(parsed.getUnitPrice());
-            item.setAmount(parsed.getAmount());
-            item.setCurrency("SGD");
-            item.setCreatedAt(OffsetDateTime.now());
-
-            items.add(item);
-        }
-
-        log.info("[{}] Parsed items receiptId={} items={}",
-                RequestCorrelation.getRequestId(), receiptId, items.size());
-
-        return items;
-    }
-
-    private List<ReceiptItemEntity> categorize(List<ReceiptItemEntity> items) {
-        if (items.isEmpty()) {
-            return items;
-        }
-
-        for (ReceiptItemEntity item : items) {
-            CategorizationResult r = categorizer.categorize(
-                    item.getItemName(),
-                    item.getRawLine()
-            );
-
-            item.setCategory(r.getCategory());
-            item.setConfidence(
-                    r.getConfidence().setScale(2, java.math.RoundingMode.HALF_UP)
-            );
-        }
-
-        return items;
-    }
-
-    private String safeContentType(String contentType) {
-        if (contentType == null || contentType.isBlank()) {
-            return "unknown";
-        }
-        return contentType.trim();
     }
 }
