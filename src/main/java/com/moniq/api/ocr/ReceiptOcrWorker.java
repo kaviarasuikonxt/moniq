@@ -1,10 +1,9 @@
-// src/main/java/com/moniq/api/ocr/ReceiptOcrWorker.java
 package com.moniq.api.ocr;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.moniq.api.web.RequestCorrelation;
 import com.azure.storage.queue.QueueClient;
 import com.azure.storage.queue.models.QueueMessageItem;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.moniq.api.web.RequestCorrelation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -46,6 +45,9 @@ public class ReceiptOcrWorker implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        log.info("ReceiptOcrWorker init enabled={} pollIntervalMs={} visibilityTimeoutSeconds={}",
+                enabled, pollIntervalMs, visibilityTimeoutSeconds);
+
         if (!enabled) {
             log.info("ReceiptOcrWorker disabled (app.ocr.worker.enabled=false)");
             return;
@@ -53,7 +55,7 @@ public class ReceiptOcrWorker implements ApplicationRunner {
 
         QueueClient queueClient = queueClientProvider.getIfAvailable();
         if (queueClient == null) {
-            log.warn("ReceiptOcrWorker enabled but Azure Queue is not configured (storage.connection-string missing).");
+            log.warn("ReceiptOcrWorker enabled but Azure Queue is not configured or QueueClient bean is unavailable.");
             return;
         }
 
@@ -62,45 +64,61 @@ public class ReceiptOcrWorker implements ApplicationRunner {
                 pollIntervalMs, visibilityTimeoutSeconds);
 
         while (true) {
+            OcrJobMessage job = null;
             try {
-                /*List<QueueMessageItem> messages = queueClient.receiveMessages(
-                        1,
-                        Duration.ofSeconds(visibilityTimeoutSeconds),
-                        null);*/
-
                 Iterable<QueueMessageItem> iterable = queueClient.receiveMessages(
                         1,
                         Duration.ofSeconds(visibilityTimeoutSeconds),
                         Duration.ofSeconds(5),
-                        com.azure.core.util.Context.NONE);
+                        com.azure.core.util.Context.NONE
+                );
 
                 var it = iterable.iterator();
                 if (!it.hasNext()) {
-                    Thread.sleep(pollIntervalMs);
+                    sleepQuietly(pollIntervalMs);
                     continue;
                 }
-                QueueMessageItem msg = it.next();
 
+                QueueMessageItem msg = it.next();
                 if (msg == null) {
-                    Thread.sleep(pollIntervalMs);
+                    sleepQuietly(pollIntervalMs);
                     continue;
                 }
 
                 RequestCorrelation.setRequestId("ocr-" + UUID.randomUUID());
 
-                OcrJobMessage job = objectMapper.readValue(msg.getBody().toString(), OcrJobMessage.class);
+                String payload = msg.getBody().toString();
+                log.info("[{}] Raw queue payload={}", RequestCorrelation.getRequestId(), payload);
+
+                job = objectMapper.readValue(payload, OcrJobMessage.class);
 
                 log.info("[{}] Dequeued OCR job receiptId={} userId={} blobName={}",
-                        RequestCorrelation.getRequestId(), job.getReceiptId(), job.getUserId(), job.getBlobName());
+                        RequestCorrelation.getRequestId(),
+                        job.getReceiptId(),
+                        job.getUserId(),
+                        job.getBlobName());
 
                 processor.process(job);
 
                 queueClient.deleteMessage(msg.getMessageId(), msg.getPopReceipt());
+
                 log.info("[{}] OCR job done receiptId={} (message deleted)",
-                        RequestCorrelation.getRequestId(), job.getReceiptId());
+                        RequestCorrelation.getRequestId(),
+                        job.getReceiptId());
 
             } catch (Exception e) {
-                log.error("Worker loop error: {}", e.getMessage(), e);
+                if (job != null) {
+                    log.error("[{}] Worker loop error receiptId={} message={}",
+                            RequestCorrelation.getRequestId(),
+                            job.getReceiptId(),
+                            e.getMessage(),
+                            e);
+                } else {
+                    log.error("[{}] Worker loop error before job parse message={}",
+                            RequestCorrelation.getRequestId(),
+                            e.getMessage(),
+                            e);
+                }
                 sleepQuietly(pollIntervalMs);
             } finally {
                 RequestCorrelation.clear();
