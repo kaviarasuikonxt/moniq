@@ -12,6 +12,7 @@ public class MarketWeightedItemsParsingStrategy implements ReceiptParsingStrateg
     private static final Pattern DECORATOR_PATTERN = Pattern.compile("^[\\-*_=#.:]{2,}$");
     private static final Pattern MONEY_PATTERN = Pattern.compile("^[-$]?\\d+(\\.\\d{1,3})?$");
     private static final Pattern WEIGHT_PATTERN = Pattern.compile("^\\d+(\\.\\d+)?\\s*KG$", Pattern.CASE_INSENSITIVE);
+    @SuppressWarnings("unused")
     private static final Pattern ITEM_NUMBER_PATTERN = Pattern.compile("^\\d{5,8}$");
 
     @Override

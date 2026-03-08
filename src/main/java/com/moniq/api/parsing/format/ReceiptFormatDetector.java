@@ -34,7 +34,7 @@ public class ReceiptFormatDetector {
         }
 
         if (containsAny(text,
-                "ESSO", "SHELL", "CALTEX", "SPC", "SINOPEC")) {
+                "ESSO", "SHELL", "CALTEX", "SPC", "SINOPEC", "SERVICE STATION")) {
             return ReceiptFormat.GAS_STATION;
         }
 
@@ -57,13 +57,13 @@ public class ReceiptFormatDetector {
         return ReceiptFormat.UNKNOWN;
     }
 
-   private boolean looksLikeWeightedItems(String text) {
-    return (
-            containsAny(text, "KG", "KGS", "/KG", "WEIGHT")
-                    || text.contains("0.")
-                    || text.matches("(?s).*\\d+\\.\\d+KG.*")
-    ) && containsAny(text, "PRICE", "TOTAL", "AMOUNT", "QTY", "DESCRIPTION");
-}
+    private boolean looksLikeWeightedItems(String text) {
+        return (
+                containsAny(text, "KG", "KGS", "/KG", "WEIGHT")
+                        || text.contains("0.")
+                        || text.matches("(?s).*\\d+\\.\\d+KG.*")
+        ) && containsAny(text, "PRICE", "TOTAL", "AMOUNT", "QTY", "DESCRIPTION");
+    }
 
     private boolean looksLikeRestaurant(String text) {
         return containsAny(text,

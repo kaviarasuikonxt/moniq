@@ -1,459 +1,643 @@
 package com.moniq.api.parsing;
 
-import org.springframework.stereotype.Service;
-
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-@Service
+import org.springframework.stereotype.Component;
+
+@Component
 public class ReceiptItemParser {
 
-    private static final Pattern PURE_NUMBER = Pattern.compile("^\\d+(?:\\.\\d+)?$");
-    private static final Pattern ITEM_CODE_PATTERN = Pattern.compile("^\\d{1,8}$");
-    private static final Pattern ALPHA_PATTERN = Pattern.compile(".*[A-Za-z].*");
+    private static final Pattern MONEY_PATTERN = Pattern.compile("[-$]?\\d+(\\.\\d{1,3})?");
+    private static final Pattern INTEGER_PATTERN = Pattern.compile("\\d+");
+    private static final Pattern WEIGHT_PATTERN = Pattern.compile("\\d+(\\.\\d+)?\\s*KG", Pattern.CASE_INSENSITIVE);
+    private static final Pattern DECORATOR_PATTERN = Pattern.compile("^[\\-*_=#.:]{2,}$");
+    private static final Pattern BARCODE_PATTERN = Pattern.compile("^\\d{8,14}$");
 
-    // Single-line table format:
-    // ITEM NAME    QTY    PRICE    TOTAL
-    // Example:
-    // Roti Boy Bun eac 1 1.70 1.70
-    private static final Pattern SINGLE_LINE_ITEM_PATTERN =
-            Pattern.compile("^(.+?)\\s+(\\d+(?:\\.\\d{1,3})?)\\s+(\\d+(?:\\.\\d{1,2})?)\\s+(\\d+(?:\\.\\d{1,2})?)$");
-
-    private static final List<String> NOISE_WORDS = List.of(
-            "u stars", "branch", "cashier", "saleman", "name/itemno", "price", "qty",
-            "total", "number", "originalamount", "discountamount", "specialamount",
-            "gst", "pay", "remark", "feedback", "store", "member", "loyalty",
-            "visa", "mastercard", "cash", "change", "receipt", "reg no",
-            "sent to", "singapore", "link", "default",
-            "slip", "termi", "staff no", "comments", "item name", "net amt",
-            "inc gst", "business reg", "merchant id", "terminal id", "trans date/time",
-            "transaction amount", "goods solds are not returnable", "thank you"
-    );
-
-    public ParsedItem parse(String line) {
-        if (line == null || line.isBlank()) {
-            return null;
-        }
-
-        String raw = clean(line);
-        if (raw.isBlank() || isNoise(raw)) {
-            return null;
-        }
-
-        // 1) First try single-line table parser
-        ParsedItem singleLine = parseSingleLineItem(raw, line);
-        if (singleLine != null) {
-            return singleLine;
-        }
-
-        // 2) Fallback to old single-line amount-at-end logic
-        String[] parts = raw.split("\\s+");
-        if (parts.length < 2) {
-            return null;
-        }
-
-        BigDecimal amount = tryParseAmount(parts[parts.length - 1]);
-        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
-            return null;
-        }
-
-        BigDecimal quantity = BigDecimal.ONE;
-        String itemName = raw.substring(0, raw.lastIndexOf(parts[parts.length - 1])).trim();
-
-        if (parts.length >= 3) {
-            BigDecimal possibleQty = tryParseQuantity(parts[parts.length - 2]);
-            if (possibleQty != null) {
-                quantity = possibleQty;
-                itemName = raw.substring(0, raw.lastIndexOf(parts[parts.length - 2])).trim();
-            }
-        }
-
-        itemName = normalizeItemName(itemName);
-        if (itemName.isBlank()) {
-            return null;
-        }
-
-        ParsedItem item = new ParsedItem();
-        item.setRawLine(line);
-        item.setItemName(itemName);
-        item.setQuantity(quantity);
-        item.setAmount(amount);
-        item.setUnitPrice(
-                quantity.compareTo(BigDecimal.ZERO) > 0
-                        ? amount.divide(quantity, 2, RoundingMode.HALF_UP)
-                        : amount
-        );
-
-        return item;
-    }
-
-    public List<ParsedItem> parseReceipt(String rawText) {
-        if (rawText == null || rawText.isBlank()) {
+    public List<ParsedItem> parseReceipt(String text) {
+        if (text == null || text.isBlank()) {
             return List.of();
         }
 
-        List<String> lines = splitAndClean(rawText);
-        List<ParsedItem> items = new ArrayList<>();
+        List<String> lines = normalizeLines(text);
+        List<ParsedItem> result = new ArrayList<>();
 
-        for (int i = 0; i < lines.size(); i++) {
+        int i = 0;
+        while (i < lines.size()) {
             String line = lines.get(i);
 
-            // 1) First try direct single-line item parsing
-            ParsedItem singleLine = parseSingleLineItem(line, line);
-            if (singleLine != null) {
-                items.add(singleLine);
+            if (shouldSkipLine(line)) {
+                i++;
                 continue;
             }
 
-            // 2) Then try multi-line item parsing
-            if (!looksLikeItemName(line)) {
+            // 1) One-line compact row: bakery / compact supermarket
+            ParsedItem oneLine = tryParseSingleLineRow(line);
+            if (oneLine != null) {
+                result.add(oneLine);
+                i++;
                 continue;
             }
 
-            String itemName = normalizeItemName(line);
-            if (itemName.isBlank()) {
+            // 2) Weighted produce block
+            ParsedItem weighted = tryParseWeightedBlock(lines, i);
+            if (weighted != null) {
+                result.add(weighted);
+                i += weighted.getConsumedLines();
                 continue;
             }
 
-            ScanResult scan = scanForward(lines, i + 1);
-            if (scan == null || scan.total == null || scan.total.compareTo(BigDecimal.ZERO) <= 0) {
+            // 3) UStar multiline block
+            ParsedItem ustar = tryParseUstarBlock(lines, i);
+            if (ustar != null) {
+                result.add(ustar);
+                i += ustar.getConsumedLines();
                 continue;
             }
 
-            ParsedItem item = new ParsedItem();
-            item.setRawLine(line);
-            item.setItemName(itemName);
-            item.setQuantity(scan.quantity != null ? scan.quantity : BigDecimal.ONE.setScale(3, RoundingMode.HALF_UP));
-            item.setUnitPrice(scan.unitPrice != null
-                    ? scan.unitPrice
-                    : scan.total.divide(item.getQuantity(), 2, RoundingMode.HALF_UP));
-            item.setAmount(scan.total);
+            // 4) Generic multiline item block
+            ParsedItem generic = tryParseGenericMultilineBlock(lines, i);
+            if (generic != null) {
+                result.add(generic);
+                i += generic.getConsumedLines();
+                continue;
+            }
 
-            items.add(item);
-
-            i = scan.lastConsumedIndex;
+            i++;
         }
 
-        return items;
+        return compact(result);
     }
 
-    private ParsedItem parseSingleLineItem(String cleanedLine, String rawLine) {
-        Matcher matcher = SINGLE_LINE_ITEM_PATTERN.matcher(cleanedLine);
-        if (!matcher.matches()) {
+    private ParsedItem tryParseSingleLineRow(String line) {
+        String cleaned = normalize(line);
+
+        if (shouldSkipLine(cleaned) || !containsLetter(cleaned)) {
             return null;
         }
 
-        String possibleName = matcher.group(1);
-        BigDecimal qty = tryParseQuantity(matcher.group(2));
-        BigDecimal unitPrice = tryParseAmount(matcher.group(3));
-        BigDecimal total = tryParseAmount(matcher.group(4));
-
-        if (qty == null || unitPrice == null || total == null) {
+        List<String> tokens = splitTokens(cleaned);
+        if (tokens.size() < 2) {
             return null;
         }
 
-        String itemName = normalizeItemName(possibleName);
-        if (itemName.isBlank() || isNoise(itemName)) {
+        List<String> numericTokens = new ArrayList<>();
+        List<String> textTokens = new ArrayList<>();
+
+        for (String token : tokens) {
+            String t = cleanNumericToken(token);
+            if (looksLikeMoney(t) || looksLikeQuantity(t) || looksLikeWeight(t)) {
+                numericTokens.add(t);
+            } else {
+                textTokens.add(token);
+            }
+        }
+
+        if (textTokens.isEmpty() || numericTokens.isEmpty()) {
             return null;
         }
 
-        ParsedItem item = new ParsedItem();
-        item.setRawLine(rawLine);
-        item.setItemName(itemName);
-        item.setQuantity(qty.setScale(3, RoundingMode.HALF_UP));
-        item.setUnitPrice(unitPrice.setScale(2, RoundingMode.HALF_UP));
-        item.setAmount(total.setScale(2, RoundingMode.HALF_UP));
-        return item;
+        // Bakery: NAME QTY PRICE AMOUNT
+        if (numericTokens.size() >= 3) {
+            BigDecimal qty = tryDecimal(numericTokens.get(0));
+            BigDecimal unitPrice = tryDecimal(numericTokens.get(1));
+            BigDecimal amount = tryDecimal(numericTokens.get(2));
+
+            if (amount != null && amount.compareTo(BigDecimal.ZERO) > 0) {
+                return ParsedItem.of(
+                        String.join(" ", textTokens),
+                        cleaned,
+                        qty,
+                        unitPrice,
+                        amount,
+                        1
+                );
+            }
+        }
+
+        // Compact supermarket: NAME PRICE
+        if (numericTokens.size() == 1) {
+            BigDecimal amount = tryDecimal(numericTokens.get(0));
+            if (amount != null && amount.compareTo(BigDecimal.ZERO) > 0) {
+                return ParsedItem.of(
+                        String.join(" ", textTokens),
+                        cleaned,
+                        BigDecimal.ONE,
+                        amount,
+                        amount,
+                        1
+                );
+            }
+        }
+
+        // Weighted compact: NAME WEIGHT AMOUNT
+        if (numericTokens.size() == 2) {
+            BigDecimal first = tryDecimal(stripWeightSuffix(numericTokens.get(0)));
+            BigDecimal second = tryDecimal(stripWeightSuffix(numericTokens.get(1)));
+
+            if (second != null && second.compareTo(BigDecimal.ZERO) > 0) {
+                return ParsedItem.of(
+                        String.join(" ", textTokens),
+                        cleaned,
+                        first,
+                        null,
+                        second,
+                        1
+                );
+            }
+        }
+
+        return null;
     }
 
-    private ScanResult scanForward(List<String> lines, int start) {
-        BigDecimal unitPrice = null;
-        BigDecimal quantity = null;
-        BigDecimal total = null;
-        int consumed = start - 1;
+    private ParsedItem tryParseWeightedBlock(List<String> lines, int index) {
+        if (index >= lines.size()) {
+            return null;
+        }
 
-        for (int j = start; j < Math.min(start + 5, lines.size()); j++) {
-            String next = lines.get(j);
-            String cleaned = clean(next);
+        String line1 = lines.get(index);
+        if (!containsLetter(line1) || shouldSkipLine(line1)) {
+            return null;
+        }
 
-            if (cleaned.isBlank()) {
-                continue;
+        String line2 = getLine(lines, index + 1);
+        String line3 = getLine(lines, index + 2);
+        String line4 = getLine(lines, index + 3);
+
+        // Patterns seen:
+        // Kadalai
+        // 1
+        // 0.318kg
+        // 1.75
+        if (looksLikeInteger(line2) && looksLikeWeight(line3) && looksLikeMoney(line4)) {
+            BigDecimal qty = tryDecimal(cleanNumericToken(line2));
+            BigDecimal amount = tryDecimal(cleanNumericToken(line4));
+
+            if (amount != null && amount.compareTo(BigDecimal.ZERO) > 0) {
+                return ParsedItem.of(
+                        line1,
+                        joinRawLines(line1, line2, line3, line4),
+                        qty,
+                        null,
+                        amount,
+                        4
+                );
             }
+        }
 
-            // if next line itself is a single-line item, stop current multiline scan
-            if (parseSingleLineItem(cleaned, cleaned) != null) {
-                break;
+        // Pattern:
+        // Guava India
+        // 0.216kg
+        // 1.19
+        if (looksLikeWeight(line2) && looksLikeMoney(line3)) {
+            BigDecimal qty = tryDecimal(stripWeightSuffix(cleanNumericToken(line2)));
+            BigDecimal amount = tryDecimal(cleanNumericToken(line3));
+
+            if (amount != null && amount.compareTo(BigDecimal.ZERO) > 0) {
+                return ParsedItem.of(
+                        line1,
+                        joinRawLines(line1, line2, line3),
+                        qty,
+                        null,
+                        amount,
+                        3
+                );
             }
+        }
 
-            if (looksLikeItemName(cleaned)) {
-                break;
+        return null;
+    }
+
+    private ParsedItem tryParseUstarBlock(List<String> lines, int index) {
+        if (index >= lines.size()) {
+            return null;
+        }
+
+        String line1 = lines.get(index);
+        if (!containsLetter(line1) || shouldSkipLine(line1)) {
+            return null;
+        }
+
+        String line2 = getLine(lines, index + 1);
+        String line3 = getLine(lines, index + 2);
+        String line4 = getLine(lines, index + 3);
+        String line5 = getLine(lines, index + 4);
+
+        // Example:
+        // SENG CHOON UKRAINE EGGS 305/888843677779
+        // 4
+        // 6.90
+        // 1.000
+        // 6.90
+        if (looksLikeInteger(line2) && looksLikeMoney(line3) && looksLikeMoney(line4) && looksLikeMoney(line5)) {
+            BigDecimal unitPrice = tryDecimal(cleanNumericToken(line3));
+            BigDecimal qty = tryDecimal(cleanNumericToken(line4));
+            BigDecimal amount = tryDecimal(cleanNumericToken(line5));
+
+            if (amount != null && amount.compareTo(BigDecimal.ZERO) > 0) {
+                return ParsedItem.of(
+                        stripTrailingBarcodeFromName(line1),
+                        joinRawLines(line1, line2, line3, line4, line5),
+                        qty,
+                        unitPrice,
+                        amount,
+                        5
+                );
             }
+        }
 
-            if (isStopSection(cleaned)) {
-                break;
-            }
+        // Example:
+        // M'SIA BABY SPINACH 苋菜苗 250G/955592040
+        // 3796
+        // 1.80 2.000
+        // 3.60
+        if (looksLikeInteger(line2) && looksLikeCombinedPriceQty(line3) && looksLikeMoney(line4)) {
+            String[] pq = splitPriceQty(line3);
+            if (pq != null) {
+                BigDecimal unitPrice = tryDecimal(pq[0]);
+                BigDecimal qty = tryDecimal(pq[1]);
+                BigDecimal amount = tryDecimal(cleanNumericToken(line4));
 
-            if (ITEM_CODE_PATTERN.matcher(cleaned).matches()) {
-                consumed = j;
-                continue;
-            }
-
-            String[] pair = cleaned.split("\\s+");
-            if (pair.length == 2) {
-                BigDecimal p1 = tryParseAmount(pair[0]);
-                BigDecimal p2 = tryParseQuantity(pair[1]);
-                if (p1 != null && p2 != null) {
-                    unitPrice = p1.setScale(2, RoundingMode.HALF_UP);
-                    quantity = p2.setScale(3, RoundingMode.HALF_UP);
-                    consumed = j;
-                    continue;
+                if (amount != null && amount.compareTo(BigDecimal.ZERO) > 0) {
+                    return ParsedItem.of(
+                            stripTrailingBarcodeFromName(line1),
+                            joinRawLines(line1, line2, line3, line4),
+                            qty,
+                            unitPrice,
+                            amount,
+                            4
+                    );
                 }
             }
-
-            BigDecimal n = tryParseAmount(cleaned);
-            if (n == null) {
-                continue;
-            }
-
-            if (unitPrice == null) {
-                unitPrice = n.setScale(2, RoundingMode.HALF_UP);
-                consumed = j;
-                continue;
-            }
-
-            if (quantity == null && looksLikeQuantity(cleaned)) {
-                quantity = n.setScale(3, RoundingMode.HALF_UP);
-                consumed = j;
-                continue;
-            }
-
-            if (total == null) {
-                total = n.setScale(2, RoundingMode.HALF_UP);
-                consumed = j;
-                continue;
-            }
         }
 
-        if (total == null) {
+        return null;
+    }
+
+    private ParsedItem tryParseGenericMultilineBlock(List<String> lines, int index) {
+        if (index >= lines.size()) {
             return null;
         }
 
-        ScanResult r = new ScanResult();
-        r.unitPrice = unitPrice;
-        r.quantity = quantity != null ? quantity : BigDecimal.ONE.setScale(3, RoundingMode.HALF_UP);
-        r.total = total;
-        r.lastConsumedIndex = consumed;
-        return r;
-    }
+        String name = lines.get(index);
+        if (!containsLetter(name) || shouldSkipLine(name)) {
+            return null;
+        }
 
-    private List<String> splitAndClean(String rawText) {
-        String[] arr = rawText.split("\\r?\\n");
-        List<String> out = new ArrayList<>();
-        for (String line : arr) {
-            String cleaned = clean(line);
-            if (!cleaned.isBlank()) {
-                out.add(cleaned);
+        String line2 = getLine(lines, index + 1);
+        String line3 = getLine(lines, index + 2);
+        String line4 = getLine(lines, index + 3);
+
+        // NAME / qty / price / amount
+        if (looksLikeQuantity(line2) && looksLikeMoney(line3) && looksLikeMoney(line4)) {
+            BigDecimal qty = tryDecimal(cleanNumericToken(line2));
+            BigDecimal unitPrice = tryDecimal(cleanNumericToken(line3));
+            BigDecimal amount = tryDecimal(cleanNumericToken(line4));
+
+            if (amount != null && amount.compareTo(BigDecimal.ZERO) > 0) {
+                return ParsedItem.of(
+                        name,
+                        joinRawLines(name, line2, line3, line4),
+                        qty,
+                        unitPrice,
+                        amount,
+                        4
+                );
             }
         }
-        return out;
+
+        // NAME / amount only
+        if (looksLikeMoney(line2)) {
+            BigDecimal amount = tryDecimal(cleanNumericToken(line2));
+            if (amount != null && amount.compareTo(BigDecimal.ZERO) > 0) {
+                return ParsedItem.of(
+                        name,
+                        joinRawLines(name, line2),
+                        BigDecimal.ONE,
+                        amount,
+                        amount,
+                        2
+                );
+            }
+        }
+
+        return null;
     }
 
-    private String clean(String line) {
-        if (line == null) {
+    private List<ParsedItem> compact(List<ParsedItem> items) {
+        List<ParsedItem> result = new ArrayList<>();
+
+        for (ParsedItem item : items) {
+            if (item == null) {
+                continue;
+            }
+
+            if (item.getItemName() == null || item.getItemName().isBlank()) {
+                continue;
+            }
+
+            if (looksLikeNoise(item.getItemName())) {
+                continue;
+            }
+
+            if (item.getAmount() == null || item.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+                continue;
+            }
+
+            result.add(item);
+        }
+
+        return result;
+    }
+
+    private List<String> normalizeLines(String text) {
+        String[] raw = text.split("\\r?\\n");
+        List<String> result = new ArrayList<>();
+
+        for (String line : raw) {
+            String value = normalize(line);
+            if (!value.isBlank()) {
+                result.add(value);
+            }
+        }
+
+        return result;
+    }
+
+    private boolean shouldSkipLine(String line) {
+        if (line == null || line.isBlank()) {
+            return true;
+        }
+
+        String upper = line.toUpperCase(Locale.ROOT);
+
+        if (DECORATOR_PATTERN.matcher(line).matches()) {
+            return true;
+        }
+
+        if (BARCODE_PATTERN.matcher(line).matches()) {
+            return true;
+        }
+
+        return upper.equals("ITEM")
+                || upper.equals("ITEM NAME")
+                || upper.equals("DESCRIPTION")
+                || upper.equals("NAME/ITEMNO")
+                || upper.equals("QTY")
+                || upper.equals("PRICE")
+                || upper.equals("TOTAL")
+                || upper.equals("NET AMT")
+                || upper.equals("INC GST")
+                || upper.startsWith("SUBTOTAL")
+                || upper.startsWith("GST")
+                || upper.startsWith("TOTAL:")
+                || upper.startsWith("TOTAL ")
+                || upper.startsWith("PAYMENT")
+                || upper.startsWith("NETS")
+                || upper.startsWith("VISA")
+                || upper.startsWith("MASTER")
+                || upper.startsWith("CARD")
+                || upper.startsWith("CASH")
+                || upper.startsWith("CHANGE")
+                || upper.startsWith("THANK YOU")
+                || upper.startsWith("LINK CARD")
+                || upper.startsWith("LINKPTS")
+                || upper.startsWith("SHAREHOLDER")
+                || upper.startsWith("APPROVED")
+                || upper.startsWith("TERMINAL")
+                || upper.startsWith("TRANSACTION")
+                || upper.startsWith("AUTH.")
+                || upper.startsWith("REMARK")
+                || upper.startsWith("GOODS SOLD")
+                || upper.startsWith("MERCHANT ID")
+                || upper.startsWith("TRANS DATE/TIME")
+                || upper.startsWith("TRANSACTION AMOUNT")
+                || upper.startsWith("AMOUNT TENDERED")
+                || upper.startsWith("CHANGE DUE");
+    }
+
+    private boolean looksLikeNoise(String value) {
+        String upper = normalize(value).toUpperCase(Locale.ROOT);
+
+        return upper.contains("TOTAL")
+                || upper.contains("GST")
+                || upper.contains("PAYMENT")
+                || upper.contains("NETS")
+                || upper.contains("VISA")
+                || upper.contains("MASTER")
+                || upper.contains("LINKPTS")
+                || upper.contains("APPROVED")
+                || upper.contains("THANK YOU")
+                || upper.contains("TENDERED")
+                || upper.contains("CHANGE")
+                || upper.contains("DISCOUNT")
+                || upper.contains("TRANSACTION")
+                || upper.contains("TERMINAL")
+                || upper.contains("AUTH.")
+                || upper.contains("REMARK")
+                || upper.contains("GOODS SOLD");
+    }
+
+    private boolean containsLetter(String value) {
+        return value != null && value.matches(".*[A-Za-z].*");
+    }
+
+    private boolean looksLikeMoney(String value) {
+        String cleaned = cleanNumericToken(value);
+        return cleaned != null && MONEY_PATTERN.matcher(cleaned).matches();
+    }
+
+    private boolean looksLikeQuantity(String value) {
+        String cleaned = cleanNumericToken(value);
+        return cleaned != null && (MONEY_PATTERN.matcher(cleaned).matches() || INTEGER_PATTERN.matcher(cleaned).matches());
+    }
+
+    private boolean looksLikeInteger(String value) {
+        String cleaned = cleanNumericToken(value);
+        return cleaned != null && INTEGER_PATTERN.matcher(cleaned).matches();
+    }
+
+    private boolean looksLikeWeight(String value) {
+        String cleaned = normalize(value).toUpperCase(Locale.ROOT).replace(" ", "");
+        return WEIGHT_PATTERN.matcher(cleaned).matches();
+    }
+
+    private boolean looksLikeCombinedPriceQty(String value) {
+        String normalized = normalize(value).replace("$", "");
+        String[] parts = normalized.split("\\s+");
+        if (parts.length != 2) {
+            return false;
+        }
+        return looksLikeMoney(parts[0]) && looksLikeMoney(parts[1]);
+    }
+
+    private String[] splitPriceQty(String value) {
+        String normalized = normalize(value).replace("$", "");
+        String[] parts = normalized.split("\\s+");
+        if (parts.length != 2) {
+            return null;
+        }
+        if (!looksLikeMoney(parts[0]) || !looksLikeMoney(parts[1])) {
+            return null;
+        }
+        return new String[]{cleanNumericToken(parts[0]), cleanNumericToken(parts[1])};
+    }
+
+    private String stripTrailingBarcodeFromName(String name) {
+        List<String> tokens = splitTokens(normalize(name));
+        if (tokens.isEmpty()) {
+            return normalize(name);
+        }
+
+        List<String> result = new ArrayList<>();
+        for (String token : tokens) {
+            if (BARCODE_PATTERN.matcher(token).matches()) {
+                continue;
+            }
+            result.add(token);
+        }
+
+        return String.join(" ", result).trim();
+    }
+
+    private String cleanNumericToken(String token) {
+        if (token == null) {
             return "";
         }
 
-        return line
-                .replace('：', ':')
-                .replace('；', ';')
-                .replaceAll("(\\d)\\.\\s+(\\d)", "$1.$2")
+        return token.replace("$", "")
+                .replace(",", ".")
+                .replaceAll("\\s+", "")
+                .trim();
+    }
+
+    private String stripWeightSuffix(String token) {
+        if (token == null) {
+            return "";
+        }
+
+        return token.toUpperCase(Locale.ROOT)
+                .replace("KG", "")
+                .trim();
+    }
+
+    private BigDecimal tryDecimal(String value) {
+        try {
+            String cleaned = cleanNumericToken(value);
+            if (cleaned == null || cleaned.isBlank() || cleaned.equals("-")) {
+                return null;
+            }
+            return new BigDecimal(cleaned);
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private String getLine(List<String> lines, int index) {
+        if (index < 0 || index >= lines.size()) {
+            return "";
+        }
+        return lines.get(index);
+    }
+
+    private String normalize(String value) {
+        if (value == null) {
+            return "";
+        }
+
+        return value.replace('\r', ' ')
+                .replace('\n', ' ')
                 .replaceAll("\\s+", " ")
                 .trim();
     }
 
-    private boolean isNoise(String line) {
-        String v = line.toLowerCase(Locale.ROOT).trim();
-
-        if (v.isBlank() || v.length() <= 1) {
-            return true;
+    private List<String> splitTokens(String value) {
+        String normalized = normalize(value);
+        if (normalized.isBlank()) {
+            return List.of();
         }
 
-        if (v.contains("@")) {
-            return true;
-        }
-
-        if (v.matches("^\\d{10,}$")) {
-            return true;
-        }
-
-        if (v.matches("^[\\-_=]{3,}$")) {
-            return true;
-        }
-
-        for (String word : NOISE_WORDS) {
-            if (v.contains(word)) {
-                return true;
+        String[] parts = normalized.split("\\s+");
+        List<String> result = new ArrayList<>();
+        for (String part : parts) {
+            if (!part.isBlank()) {
+                result.add(part.trim());
             }
         }
-
-        return false;
+        return result;
     }
 
-    private boolean isStopSection(String line) {
-        String v = line.toLowerCase(Locale.ROOT);
-        return v.contains("qty:")
-                || v.contains("subtotal")
-                || v.contains("originalamount")
-                || v.contains("discountamount")
-                || v.contains("specialamount")
-                || v.contains("gst")
-                || v.contains("pay:")
-                || v.contains("nets")
-                || v.contains("remark")
-                || v.contains("total $");
-    }
-
-    private boolean looksLikeItemName(String line) {
-        String v = line.toLowerCase(Locale.ROOT);
-
-        if (!ALPHA_PATTERN.matcher(v).matches()) {
-            return false;
+    private String joinRawLines(String... lines) {
+        List<String> result = new ArrayList<>();
+        for (String line : lines) {
+            String value = normalize(line);
+            if (!value.isBlank()) {
+                result.add(value);
+            }
         }
-
-        if (isNoise(v)) {
-            return false;
-        }
-
-        if (PURE_NUMBER.matcher(v).matches()) {
-            return false;
-        }
-
-        if (ITEM_CODE_PATTERN.matcher(v).matches()) {
-            return false;
-        }
-
-        return true;
-    }
-
-    private boolean looksLikeQuantity(String line) {
-        BigDecimal n = tryParseAmount(line);
-        if (n == null) {
-            return false;
-        }
-
-        return n.compareTo(BigDecimal.ZERO) > 0
-                && n.compareTo(new BigDecimal("20.000")) <= 0
-                && line.contains(".");
-    }
-
-    private BigDecimal tryParseAmount(String text) {
-        if (text == null) {
-            return null;
-        }
-
-        String v = text.trim()
-                .replace(",", "")
-                .replaceAll("\\s+", "");
-
-        if (!v.matches("^\\d+(?:\\.\\d{1,3})?$")) {
-            return null;
-        }
-
-        try {
-            return new BigDecimal(v);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private BigDecimal tryParseQuantity(String text) {
-        BigDecimal n = tryParseAmount(text);
-        if (n == null) {
-            return null;
-        }
-
-        if (n.compareTo(BigDecimal.ZERO) <= 0 || n.compareTo(new BigDecimal("50")) > 0) {
-            return null;
-        }
-
-        return n.setScale(3, RoundingMode.HALF_UP);
-    }
-
-    private String normalizeItemName(String itemName) {
-        if (itemName == null) {
-            return "";
-        }
-
-        String v = itemName.toLowerCase(Locale.ROOT);
-
-        v = v.replaceAll("[^a-z0-9\\s']", " ");
-        v = v.replaceAll("\\b\\d{3,}\\b", " ");
-        v = v.replaceAll("\\b\\d+g\\b", " ");
-        v = v.replaceAll("\\s+", " ").trim();
-
-        v = v.replaceAll("\\bm'sia\\b", "malaysia");
-        v = v.replaceAll("\\bmsia\\b", "malaysia");
-
-        return v;
+        return String.join(" | ", result);
     }
 
     public static class ParsedItem {
-        private String rawLine;
-        private String itemName;
-        private BigDecimal quantity;
-        private BigDecimal unitPrice;
-        private BigDecimal amount;
+        private final String itemName;
+        private final String rawLine;
+        private final BigDecimal quantity;
+        private final BigDecimal unitPrice;
+        private final BigDecimal amount;
+        private final int consumedLines;
 
-        public String getRawLine() {
-            return rawLine;
+        public ParsedItem(
+                String itemName,
+                String rawLine,
+                BigDecimal quantity,
+                BigDecimal unitPrice,
+                BigDecimal amount,
+                int consumedLines
+        ) {
+            this.itemName = itemName == null ? "" : itemName.trim();
+            this.rawLine = rawLine == null ? "" : rawLine.trim();
+            this.quantity = quantity;
+            this.unitPrice = unitPrice;
+            this.amount = amount;
+            this.consumedLines = consumedLines <= 0 ? 1 : consumedLines;
         }
 
-        public void setRawLine(String rawLine) {
-            this.rawLine = rawLine;
+        public static ParsedItem of(
+                String itemName,
+                String rawLine,
+                BigDecimal quantity,
+                BigDecimal unitPrice,
+                BigDecimal amount,
+                int consumedLines
+        ) {
+            return new ParsedItem(itemName, rawLine, quantity, unitPrice, amount, consumedLines);
         }
 
         public String getItemName() {
             return itemName;
         }
 
-        public void setItemName(String itemName) {
-            this.itemName = itemName;
+        public String getRawLine() {
+            return rawLine;
         }
 
         public BigDecimal getQuantity() {
             return quantity;
         }
 
-        public void setQuantity(BigDecimal quantity) {
-            this.quantity = quantity;
-        }
-
         public BigDecimal getUnitPrice() {
             return unitPrice;
-        }
-
-        public void setUnitPrice(BigDecimal unitPrice) {
-            this.unitPrice = unitPrice;
         }
 
         public BigDecimal getAmount() {
             return amount;
         }
 
-        public void setAmount(BigDecimal amount) {
-            this.amount = amount;
+        public int getConsumedLines() {
+            return consumedLines;
         }
-    }
-
-    private static class ScanResult {
-        private BigDecimal quantity;
-        private BigDecimal unitPrice;
-        private BigDecimal total;
-        private int lastConsumedIndex;
     }
 }
