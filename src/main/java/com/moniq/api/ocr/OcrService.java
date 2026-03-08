@@ -34,8 +34,6 @@ public class OcrService {
     private final ReceiptItemRepository itemRepo;
     private final AiCategorizer categorizer;
 
-    private final ReceiptLineFilterService lineFilter;
-    private final ReceiptLineNormalizer lineNormalizer;
     private final ReceiptItemParser itemParser;
 
     @SuppressWarnings("unused")
@@ -55,8 +53,6 @@ public class OcrService {
         this.ocrRepo = ocrRepo;
         this.itemRepo = itemRepo;
         this.categorizer = categorizer;
-        this.lineFilter = lineFilter;
-        this.lineNormalizer = lineNormalizer;
         this.itemParser = itemParser;
         this.aiEnabled = aiEnabled;
     }
@@ -105,54 +101,52 @@ public class OcrService {
         return itemRepo.findByReceiptIdOrderByLineNoAsc(receiptId);
     }
 
-    private List<ReceiptItemEntity> extractItems(UUID receiptId, String rawText) {
+   private List<ReceiptItemEntity> extractItems(UUID receiptId, String rawText) {
 
-        if (rawText == null || rawText.isBlank()) {
-            return List.of();
-        }
-
-        String[] lines = rawText.split("\\r?\\n");
-
-        List<ReceiptItemEntity> items = new ArrayList<>();
-
-        int lineNo = 1;
-
-        log.info("[{}] OCR parsing receiptId={} lines={}",
-                RequestCorrelation.getRequestId(), receiptId, lines.length);
-
-        for (String line : lines) {
-
-            if (lineFilter.isNoiseLine(line)) {
-                continue;
-            }
-
-            String normalized = lineNormalizer.normalize(line);
-
-            ReceiptItemParser.ParsedItem parsed = itemParser.parse(normalized);
-
-            if (parsed == null || parsed.getAmount() == null) {
-                continue;
-            }
-
-            ReceiptItemEntity item = new ReceiptItemEntity();
-
-            item.setId(UUID.randomUUID());
-            item.setReceiptId(receiptId);
-            item.setLineNo(lineNo++);
-            item.setRawLine(line.trim());
-
-            item.setItemName(parsed.getItemName());
-            item.setQuantity(parsed.getQuantity());
-            item.setAmount(parsed.getAmount());
-            item.setCurrency("SGD");
-
-            item.setCreatedAt(OffsetDateTime.now());
-
-            items.add(item);
-        }
-
-        return items;
+    if (rawText == null || rawText.isBlank()) {
+        return List.of();
     }
+
+    log.info("[{}] OCR parsing receiptId={} textLength={}",
+            RequestCorrelation.getRequestId(), receiptId, rawText.length());
+
+    List<ReceiptItemParser.ParsedItem> parsedItems =
+            itemParser.parseReceipt(rawText);
+
+    List<ReceiptItemEntity> items = new ArrayList<>();
+
+    int lineNo = 1;
+
+    for (ReceiptItemParser.ParsedItem parsed : parsedItems) {
+
+        if (parsed.getAmount() == null ||
+            parsed.getAmount().compareTo(java.math.BigDecimal.ZERO) <= 0) {
+            continue;
+        }
+
+        ReceiptItemEntity item = new ReceiptItemEntity();
+
+        item.setId(UUID.randomUUID());
+        item.setReceiptId(receiptId);
+        item.setLineNo(lineNo++);
+
+        item.setRawLine(parsed.getRawLine());
+        item.setItemName(parsed.getItemName());
+
+        item.setQuantity(parsed.getQuantity());
+        item.setAmount(parsed.getAmount());
+        item.setCurrency("SGD");
+
+        item.setCreatedAt(OffsetDateTime.now());
+
+        items.add(item);
+    }
+
+    log.info("[{}] Parsed items receiptId={} items={}",
+            RequestCorrelation.getRequestId(), receiptId, items.size());
+
+    return items;
+}
 
     private List<ReceiptItemEntity> categorize(List<ReceiptItemEntity> items) {
 

@@ -91,3 +91,9 @@ azure:
   vision:
     endpoint: ${AZURE_VISION_ENDPOINT:}
     key: ${AZURE_VISION_KEY:}
+moniq:
+  parsing:
+    merchants:
+      ustar:
+        multiline: true
+        pattern: PRICE_QTY_TOTAL
