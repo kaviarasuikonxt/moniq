@@ -32,10 +32,8 @@ public class OcrService {
     private final ReceiptItemRepository itemRepo;
     private final AiCategorizer categorizer;
     private final ReceiptItemParser itemParser;
-    @SuppressWarnings("unused")
     private final boolean aiEnabled;
 
-    /** Barcode pattern */
     private static final Pattern BARCODE_PATTERN =
             Pattern.compile("^\\d{10,14}$");
 
@@ -75,7 +73,9 @@ public class OcrService {
         ocrRepo.save(entity);
 
         log.info("[{}] OCR persisted receiptId={} chars={}",
-                RequestCorrelation.getRequestId(), receiptId, entity.getRawText().length());
+                RequestCorrelation.getRequestId(),
+                receiptId,
+                entity.getRawText().length());
 
         itemRepo.deleteByReceiptId(receiptId);
 
@@ -86,7 +86,9 @@ public class OcrService {
         itemRepo.saveAll(items);
 
         log.info("[{}] Items extracted receiptId={} items={}",
-                RequestCorrelation.getRequestId(), receiptId, items.size());
+                RequestCorrelation.getRequestId(),
+                receiptId,
+                items.size());
 
         return result;
     }
@@ -100,8 +102,7 @@ public class OcrService {
     }
 
     /**
-     * Step 4.3
-     * Extract only the ITEM TABLE section before parsing
+     * Extract items from OCR text.
      */
     private List<ReceiptItemEntity> extractItems(UUID receiptId, String rawText) {
 
@@ -110,12 +111,23 @@ public class OcrService {
         }
 
         log.info("[{}] OCR parsing receiptId={} textLength={}",
-                RequestCorrelation.getRequestId(), receiptId, rawText.length());
+                RequestCorrelation.getRequestId(),
+                receiptId,
+                rawText.length());
 
-        String filteredText = filterItemSection(rawText);
+        String textToParse = rawText;
+
+        /* Only apply NTUC-style filtering when receipt looks like supermarket format */
+        if (looksLikeSupermarketReceipt(rawText)) {
+
+            log.info("[{}] Applying supermarket filtering",
+                    RequestCorrelation.getRequestId());
+
+            textToParse = filterSupermarketItems(rawText);
+        }
 
         List<ReceiptItemParser.ParsedItem> parsedItems =
-                itemParser.parseReceipt(filteredText);
+                itemParser.parseReceipt(textToParse);
 
         List<ReceiptItemEntity> items = new ArrayList<>();
 
@@ -145,21 +157,36 @@ public class OcrService {
         }
 
         log.info("[{}] Parsed items receiptId={} items={}",
-                RequestCorrelation.getRequestId(), receiptId, items.size());
+                RequestCorrelation.getRequestId(),
+                receiptId,
+                items.size());
 
         return items;
     }
 
     /**
-     * Extract the actual ITEM TABLE area from OCR text
+     * Detect supermarket-style receipts (NTUC, etc.)
      */
-    private String filterItemSection(String rawText) {
+    private boolean looksLikeSupermarketReceipt(String text) {
+
+        String t = text.toUpperCase();
+
+        return t.contains("NTUC")
+                || t.contains("FAIRPRICE")
+                || t.contains("ITEM NAME")
+                || t.contains("QTY")
+                || t.contains("PRICE")
+                || t.contains("TOTAL");
+    }
+
+    /**
+     * Remove barcode lines and totals from supermarket receipts
+     */
+    private String filterSupermarketItems(String rawText) {
 
         String[] lines = rawText.split("\\r?\\n");
 
         List<String> result = new ArrayList<>();
-
-        boolean inItems = false;
 
         for (String line : lines) {
 
@@ -171,40 +198,20 @@ public class OcrService {
 
             String upper = l.toUpperCase();
 
-            /* Detect start of item section */
-            if (upper.contains("ITEM NAME") ||
-                    upper.equals("ITEM") ||
-                    upper.equals("NAME/ITEMNO")) {
-
-                inItems = true;
-                continue;
-            }
-
-            /* Stop when totals section begins */
-            if (upper.contains("TOTAL") ||
-                    upper.contains("GST") ||
-                    upper.contains("CARD") ||
-                    upper.contains("PAYMENT") ||
-                    upper.contains("APPROVAL") ||
-                    upper.contains("BATCH") ||
-                    upper.contains("REF:") ||
-                    upper.contains("TRAN TIME")) {
-
-                break;
-            }
-
-            if (!inItems) {
-                continue;
-            }
-
-            /* Remove barcodes */
             if (BARCODE_PATTERN.matcher(l).matches()) {
                 continue;
             }
 
-            /* Remove discount rows */
-            if (l.startsWith("-$") || l.contains("DISCOUNT")) {
-                continue;
+            if (upper.contains("TOTAL")
+                    || upper.contains("GST")
+                    || upper.contains("CARD")
+                    || upper.contains("PAYMENT")
+                    || upper.contains("APPROVAL")
+                    || upper.contains("BATCH")
+                    || upper.contains("REF:")
+                    || upper.contains("TRAN TIME")) {
+
+                break;
             }
 
             result.add(l);
