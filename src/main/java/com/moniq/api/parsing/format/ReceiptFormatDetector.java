@@ -57,10 +57,13 @@ public class ReceiptFormatDetector {
         return ReceiptFormat.UNKNOWN;
     }
 
-    private boolean looksLikeWeightedItems(String text) {
-        return containsAny(text, "KG", "KGS", "/KG", "WEIGHT", "0.", "0.0", "0.00")
-                && containsAny(text, "PRICE", "TOTAL", "AMOUNT", "QTY");
-    }
+   private boolean looksLikeWeightedItems(String text) {
+    return (
+            containsAny(text, "KG", "KGS", "/KG", "WEIGHT")
+                    || text.contains("0.")
+                    || text.matches("(?s).*\\d+\\.\\d+KG.*")
+    ) && containsAny(text, "PRICE", "TOTAL", "AMOUNT", "QTY", "DESCRIPTION");
+}
 
     private boolean looksLikeRestaurant(String text) {
         return containsAny(text,
