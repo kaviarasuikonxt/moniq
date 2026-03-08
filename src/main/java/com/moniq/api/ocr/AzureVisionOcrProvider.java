@@ -1,8 +1,9 @@
-// src/main/java/com/moniq/api/ocr/AzureVisionOcrProvider.java
 package com.moniq.api.ocr;
 
 import java.io.InputStream;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,6 +16,8 @@ import org.springframework.web.client.RestClient;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.moniq.api.web.RequestCorrelation;
 
 @Component
@@ -44,8 +47,8 @@ public class AzureVisionOcrProvider implements OcrProvider {
         this.maxWait = Duration.ofMillis(maxWaitMs);
 
         this.restClient = RestClient.builder()
-            .requestFactory(new org.springframework.http.client.SimpleClientHttpRequestFactory())
-            .build();
+                .requestFactory(new org.springframework.http.client.SimpleClientHttpRequestFactory())
+                .build();
     }
 
     @Override
@@ -54,10 +57,14 @@ public class AzureVisionOcrProvider implements OcrProvider {
             throw new IllegalStateException("Azure Vision endpoint/key not configured");
         }
 
+        String requestId = RequestCorrelation.getRequestId();
         String url = normalizeEndpoint(endpoint) + "/vision/v3.2/read/analyze";
 
         try {
             byte[] body = content.readAllBytes();
+
+            log.info("[{}] Azure Vision OCR request started provider={} contentType={} payloadBytes={}",
+                    requestId, providerName(), sanitizeContentType(contentType), body.length);
 
             HttpHeaders headers = new HttpHeaders();
             headers.set("Ocp-Apim-Subscription-Key", key);
@@ -65,29 +72,42 @@ public class AzureVisionOcrProvider implements OcrProvider {
             headers.setAccept(MediaType.parseMediaTypes("application/json"));
 
             ResponseEntity<Void> resp = restClient.post()
-                .uri(url)
-                .headers(h -> h.addAll(headers))
-                .body(body)
-                .retrieve()
-                .toBodilessEntity();
+                    .uri(url)
+                    .headers(h -> h.addAll(headers))
+                    .body(body)
+                    .retrieve()
+                    .toBodilessEntity();
 
             String operationLocation = resp.getHeaders().getFirst("Operation-Location");
             if (operationLocation == null || operationLocation.isBlank()) {
+                log.error("[{}] Azure Vision OCR missing operation location", requestId);
                 throw new IllegalStateException("Azure Vision missing Operation-Location header");
             }
 
-            log.info("[{}] Azure Vision OCR started operation={}",
-                RequestCorrelation.getRequestId(), operationLocation);
+            log.info("[{}] Azure Vision OCR started provider={} operationLocationReceived=true",
+                    requestId, providerName());
 
             JsonNode finalJson = poll(operationLocation);
             String rawText = extractPlainText(finalJson);
+            String providerRawResponse = safeWriteJson(finalJson);
+            String normalizedJson = buildNormalizedJson(finalJson);
 
-            // Store "normalized JSON" (what Azure returned) as JSON string
-            String normalizedJson = objectMapper.writeValueAsString(finalJson);
+            log.info("[{}] Azure Vision OCR completed provider={} rawTextLength={} normalizedJsonLength={} providerRawResponseLength={}",
+                    requestId,
+                    providerName(),
+                    rawText.length(),
+                    normalizedJson.length(),
+                    providerRawResponse.length());
 
-            return new OcrProviderResult(rawText, normalizedJson);
+            return new OcrProviderResult(
+                    rawText,
+                    normalizedJson,
+                    providerRawResponse,
+                    "SUCCEEDED"
+            );
 
         } catch (Exception e) {
+            log.error("[{}] Azure Vision OCR failed provider={}", requestId, providerName(), e);
             throw new IllegalStateException("Azure Vision OCR failed", e);
         }
     }
@@ -99,6 +119,7 @@ public class AzureVisionOcrProvider implements OcrProvider {
 
     private JsonNode poll(String operationLocation) throws Exception {
         long start = System.currentTimeMillis();
+        String requestId = RequestCorrelation.getRequestId();
 
         while (true) {
             HttpHeaders headers = new HttpHeaders();
@@ -106,21 +127,26 @@ public class AzureVisionOcrProvider implements OcrProvider {
             headers.setAccept(MediaType.parseMediaTypes("application/json"));
 
             ResponseEntity<String> resp = restClient.get()
-                .uri(operationLocation)
-                .headers(h -> h.addAll(headers))
-                .retrieve()
-                .toEntity(String.class);
+                    .uri(operationLocation)
+                    .headers(h -> h.addAll(headers))
+                    .retrieve()
+                    .toEntity(String.class);
 
             String json = resp.getBody() == null ? "{}" : resp.getBody();
             JsonNode node = objectMapper.readTree(json);
 
             String status = node.path("status").asText("");
-            if ("succeeded".equalsIgnoreCase(status)) return node;
+            if ("succeeded".equalsIgnoreCase(status)) {
+                return node;
+            }
+
             if ("failed".equalsIgnoreCase(status)) {
-                throw new IllegalStateException("Azure Vision OCR status=failed: " + json);
+                log.warn("[{}] Azure Vision OCR polling returned failed status", requestId);
+                throw new IllegalStateException("Azure Vision OCR status=failed");
             }
 
             if (System.currentTimeMillis() - start > maxWait.toMillis()) {
+                log.warn("[{}] Azure Vision OCR polling timed out afterMs={}", requestId, maxWait.toMillis());
                 throw new IllegalStateException("Azure Vision OCR timed out after " + maxWait.toMillis() + "ms");
             }
 
@@ -129,34 +155,150 @@ public class AzureVisionOcrProvider implements OcrProvider {
     }
 
     /**
-     * Extract plain text from Azure Read results:
-     * analyzeResult -> readResults[] -> lines[] -> text
+     * Day 10 Step 1:
+     * Still extract plain text for backward compatibility with Day 9 parser.
      */
     private String extractPlainText(JsonNode node) {
-        StringBuilder sb = new StringBuilder();
+        List<String> lines = new ArrayList<>();
 
         JsonNode readResults = node.path("analyzeResult").path("readResults");
         if (readResults.isArray()) {
             for (JsonNode page : readResults) {
-                JsonNode lines = page.path("lines");
-                if (lines.isArray()) {
-                    for (JsonNode line : lines) {
-                        String text = line.path("text").asText("");
+                JsonNode pageLines = page.path("lines");
+                if (pageLines.isArray()) {
+                    for (JsonNode line : pageLines) {
+                        String text = normalizeWhitespace(line.path("text").asText(""));
                         if (!text.isBlank()) {
-                            sb.append(text).append('\n');
+                            lines.add(text);
                         }
                     }
                 }
             }
         }
 
-        String out = sb.toString().trim();
-        return out.isBlank() ? "" : out;
+        return String.join("\n", lines).trim();
+    }
+
+    /**
+     * Day 10 Step 1 normalized shape:
+     * {
+     *   "provider": "AZURE_VISION",
+     *   "version": "day10-step1",
+     *   "status": "...",
+     *   "pages": [
+     *     {
+     *       "pageNumber": 1,
+     *       "width": ...,
+     *       "height": ...,
+     *       "unit": "...",
+     *       "lines": [
+     *         {
+     *           "text": "...",
+     *           "boundingBox": [...]
+     *         }
+     *       ]
+     *     }
+     *   ]
+     * }
+     */
+    private String buildNormalizedJson(JsonNode source) {
+        try {
+            ObjectNode root = objectMapper.createObjectNode();
+            root.put("provider", providerName());
+            root.put("version", "day10-step1");
+            root.put("status", source.path("status").asText("unknown"));
+
+            ArrayNode pagesArray = root.putArray("pages");
+
+            JsonNode readResults = source.path("analyzeResult").path("readResults");
+            if (readResults.isArray()) {
+                int fallbackPageNumber = 1;
+
+                for (JsonNode page : readResults) {
+                    ObjectNode normalizedPage = objectMapper.createObjectNode();
+                    normalizedPage.put("pageNumber", page.path("page").asInt(fallbackPageNumber));
+                    normalizedPage.put("width", page.path("width").asDouble(0.0d));
+                    normalizedPage.put("height", page.path("height").asDouble(0.0d));
+                    normalizedPage.put("unit", page.path("unit").asText(""));
+
+                    ArrayNode linesArray = normalizedPage.putArray("lines");
+                    JsonNode lineNodes = page.path("lines");
+
+                    if (lineNodes.isArray()) {
+                        for (JsonNode line : lineNodes) {
+                            ObjectNode normalizedLine = objectMapper.createObjectNode();
+                            normalizedLine.put("text", normalizeWhitespace(line.path("text").asText("")));
+                            normalizedLine.set("boundingBox", normalizeBoundingBox(line));
+                            linesArray.add(normalizedLine);
+                        }
+                    }
+
+                    pagesArray.add(normalizedPage);
+                    fallbackPageNumber++;
+                }
+            }
+
+            return safeWriteJson(root);
+        } catch (Exception ex) {
+            log.warn("[{}] Azure Vision normalizedJson build skipped reason={}",
+                    RequestCorrelation.getRequestId(), ex.getMessage());
+            return "{}";
+        }
+    }
+
+    private ArrayNode normalizeBoundingBox(JsonNode lineNode) {
+        ArrayNode result = objectMapper.createArrayNode();
+
+        JsonNode boundingBox = lineNode.path("boundingBox");
+        if (boundingBox.isArray()) {
+            for (JsonNode point : boundingBox) {
+                result.add(point.asDouble());
+            }
+            return result;
+        }
+
+        JsonNode polygon = lineNode.path("polygon");
+        if (polygon.isArray()) {
+            for (JsonNode point : polygon) {
+                result.add(point.asDouble());
+            }
+        }
+
+        return result;
+    }
+
+    private String safeWriteJson(JsonNode node) {
+        try {
+            return objectMapper.writeValueAsString(node == null ? objectMapper.createObjectNode() : node);
+        } catch (Exception ex) {
+            log.warn("[{}] OCR JSON serialization fallback triggered reason={}",
+                    RequestCorrelation.getRequestId(), ex.getMessage());
+            return "{}";
+        }
+    }
+
+    private String normalizeWhitespace(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        return value.replace('\r', ' ')
+                .replace('\n', ' ')
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private String sanitizeContentType(String contentType) {
+        if (contentType == null || contentType.isBlank()) {
+            return "unknown";
+        }
+        return contentType.trim();
     }
 
     private static String normalizeEndpoint(String ep) {
         String e = ep.trim();
-        if (e.endsWith("/")) e = e.substring(0, e.length() - 1);
+        if (e.endsWith("/")) {
+            e = e.substring(0, e.length() - 1);
+        }
         return e;
     }
 }

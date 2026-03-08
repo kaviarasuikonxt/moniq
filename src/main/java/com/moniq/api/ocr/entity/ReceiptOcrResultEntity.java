@@ -1,7 +1,11 @@
-// src/main/java/com/moniq/api/ocr/entity/ReceiptOcrResultEntity.java
 package com.moniq.api.ocr.entity;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.Table;
+
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
@@ -20,20 +24,14 @@ public class ReceiptOcrResultEntity {
     private String rawText;
 
     /**
-     * Store normalized OCR JSON as text, persisted to Postgres JSONB.
-     * Keeps DB flexible without requiring special Hibernate JSON types.
+     * Day 10 Step 1:
+     * Keep existing DB column name for backward compatibility.
+     * This field stores the normalized OCR JSON string.
      */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "ocr_json", columnDefinition = "jsonb")
     private String ocrJson;
 
-    public String getOcrJson() {
-        return ocrJson;
-    }
-
-    public void setOcrJson(String ocrJson) {
-        this.ocrJson = ocrJson;
-    }
     @Column(name = "provider", nullable = false, length = 32)
     private String provider = "AZURE_VISION";
 
@@ -42,21 +40,71 @@ public class ReceiptOcrResultEntity {
 
     @PrePersist
     void prePersist() {
-        if (createdAt == null) createdAt = OffsetDateTime.now();
-        if (provider == null) provider = "AZURE_VISION";
+        if (createdAt == null) {
+            createdAt = OffsetDateTime.now();
+        }
+        if (provider == null || provider.isBlank()) {
+            provider = "AZURE_VISION";
+        }
+        if (rawText == null) {
+            rawText = "";
+        }
+        if (ocrJson == null || ocrJson.isBlank()) {
+            ocrJson = "{}";
+        }
     }
 
-    public UUID getReceiptId() { return receiptId; }
-    public void setReceiptId(UUID receiptId) { this.receiptId = receiptId; }
+    public UUID getReceiptId() {
+        return receiptId;
+    }
 
-    public String getRawText() { return rawText; }
-    public void setRawText(String rawText) { this.rawText = rawText; }
+    public void setReceiptId(UUID receiptId) {
+        this.receiptId = receiptId;
+    }
 
-   
+    public String getRawText() {
+        return rawText;
+    }
 
-    public String getProvider() { return provider; }
-    public void setProvider(String provider) { this.provider = provider; }
+    public void setRawText(String rawText) {
+        this.rawText = rawText == null ? "" : rawText;
+    }
 
-    public OffsetDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; }
+    public String getOcrJson() {
+        return ocrJson;
+    }
+
+    public void setOcrJson(String ocrJson) {
+        this.ocrJson = (ocrJson == null || ocrJson.isBlank()) ? "{}" : ocrJson;
+    }
+
+    /**
+     * Alias to make Day 10 code easier to read while keeping existing DB field name.
+     */
+    public String getNormalizedJson() {
+        return getOcrJson();
+    }
+
+    /**
+     * Alias to make Day 10 code easier to read while keeping existing DB field name.
+     */
+    public void setNormalizedJson(String normalizedJson) {
+        setOcrJson(normalizedJson);
+    }
+
+    public String getProvider() {
+        return provider;
+    }
+
+    public void setProvider(String provider) {
+        this.provider = (provider == null || provider.isBlank()) ? "AZURE_VISION" : provider;
+    }
+
+    public OffsetDateTime getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(OffsetDateTime createdAt) {
+        this.createdAt = createdAt;
+    }
 }
