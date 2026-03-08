@@ -101,7 +101,7 @@ public class OcrService {
         return itemRepo.findByReceiptIdOrderByLineNoAsc(receiptId);
     }
 
-   private List<ReceiptItemEntity> extractItems(UUID receiptId, String rawText) {
+  private List<ReceiptItemEntity> extractItems(UUID receiptId, String rawText) {
 
     if (rawText == null || rawText.isBlank()) {
         return List.of();
@@ -110,33 +110,27 @@ public class OcrService {
     log.info("[{}] OCR parsing receiptId={} textLength={}",
             RequestCorrelation.getRequestId(), receiptId, rawText.length());
 
-    List<ReceiptItemParser.ParsedItem> parsedItems =
-            itemParser.parseReceipt(rawText);
+    List<ReceiptItemParser.ParsedItem> parsedItems = itemParser.parseReceipt(rawText);
 
     List<ReceiptItemEntity> items = new ArrayList<>();
-
     int lineNo = 1;
 
     for (ReceiptItemParser.ParsedItem parsed : parsedItems) {
-
         if (parsed.getAmount() == null ||
-            parsed.getAmount().compareTo(java.math.BigDecimal.ZERO) <= 0) {
+                parsed.getAmount().compareTo(java.math.BigDecimal.ZERO) <= 0) {
             continue;
         }
 
         ReceiptItemEntity item = new ReceiptItemEntity();
-
         item.setId(UUID.randomUUID());
         item.setReceiptId(receiptId);
         item.setLineNo(lineNo++);
-
         item.setRawLine(parsed.getRawLine());
         item.setItemName(parsed.getItemName());
-
         item.setQuantity(parsed.getQuantity());
+        item.setUnitPrice(parsed.getUnitPrice());
         item.setAmount(parsed.getAmount());
         item.setCurrency("SGD");
-
         item.setCreatedAt(OffsetDateTime.now());
 
         items.add(item);

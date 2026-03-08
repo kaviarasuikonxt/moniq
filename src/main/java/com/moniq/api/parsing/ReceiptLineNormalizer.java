@@ -13,17 +13,17 @@ public class ReceiptLineNormalizer {
 
         String value = line.toLowerCase();
 
-        // remove price
-        value = value.replaceAll("\\d+\\.\\d{2}$", "");
+       // fix OCR numbers like "6. 90" -> "6.90"
+    value = value.replaceAll("(\\d)\\.\\s+(\\d)", "$1.$2");
 
-        // remove quantity prefix like 2x
-        value = value.replaceAll("^\\d+x\\s*", "");
+    // fix numbers like "1. 000" -> "1.000"
+    value = value.replaceAll("(\\d)\\.\\s+(\\d{3})", "$1.$2");
 
-        // remove special characters
-        value = value.replaceAll("[^a-zA-Z\\s]", " ");
+    value = value.toLowerCase();
 
-        // remove extra spaces
-        value = value.replaceAll("\\s+", " ").trim();
+    value = value.replaceAll("[^a-z0-9.\\s']", " ");
+
+    value = value.replaceAll("\\s+", " ").trim();
 
         return value;
     }
