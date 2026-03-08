@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,16 +17,9 @@ import com.moniq.api.categorization.AiCategorizer;
 import com.moniq.api.categorization.CategorizationResult;
 import com.moniq.api.ocr.entity.ReceiptItemEntity;
 import com.moniq.api.ocr.entity.ReceiptOcrResultEntity;
-import com.moniq.api.ocr.layout.AzureOcrLayoutParser;
-import com.moniq.api.ocr.layout.OcrLayoutDocument;
-import com.moniq.api.ocr.layout.OcrLineRowGrouper;
-import com.moniq.api.ocr.layout.OcrRow;
-import com.moniq.api.ocr.layout.OcrRowTextComposer;
 import com.moniq.api.ocr.repository.ReceiptItemRepository;
 import com.moniq.api.ocr.repository.ReceiptOcrResultRepository;
 import com.moniq.api.parsing.ReceiptItemParser;
-import com.moniq.api.parsing.ReceiptLineFilterService;
-import com.moniq.api.parsing.ReceiptLineNormalizer;
 import com.moniq.api.web.RequestCorrelation;
 
 @Service
@@ -38,25 +32,19 @@ public class OcrService {
     private final ReceiptItemRepository itemRepo;
     private final AiCategorizer categorizer;
     private final ReceiptItemParser itemParser;
-
-    private final AzureOcrLayoutParser azureOcrLayoutParser;
-    private final OcrLineRowGrouper rowGrouper;
-    private final OcrRowTextComposer rowComposer;
-
     @SuppressWarnings("unused")
     private final boolean aiEnabled;
+
+    /** Barcode pattern */
+    private static final Pattern BARCODE_PATTERN =
+            Pattern.compile("^\\d{10,14}$");
 
     public OcrService(
             OcrProvider ocrProvider,
             ReceiptOcrResultRepository ocrRepo,
             ReceiptItemRepository itemRepo,
             AiCategorizer categorizer,
-            ReceiptLineFilterService lineFilter,
-            ReceiptLineNormalizer lineNormalizer,
             ReceiptItemParser itemParser,
-            AzureOcrLayoutParser azureOcrLayoutParser,
-            OcrLineRowGrouper rowGrouper,
-            OcrRowTextComposer rowComposer,
             @Value("${app.ai.enabled:false}") boolean aiEnabled
     ) {
         this.ocrProvider = ocrProvider;
@@ -64,111 +52,79 @@ public class OcrService {
         this.itemRepo = itemRepo;
         this.categorizer = categorizer;
         this.itemParser = itemParser;
-        this.azureOcrLayoutParser = azureOcrLayoutParser;
-        this.rowGrouper = rowGrouper;
-        this.rowComposer = rowComposer;
         this.aiEnabled = aiEnabled;
     }
 
     public OcrProviderResult runOcrAndPersist(UUID receiptId, InputStream blobStream, String contentType) {
 
-        String requestId = RequestCorrelation.getRequestId();
-
-        log.info("[{}] OCR processing started receiptId={} provider={}",
-                requestId, receiptId, ocrProvider.providerName());
-
         OcrProviderResult result = ocrProvider.read(blobStream, contentType);
 
-        ReceiptOcrResultEntity entity = ocrRepo.findById(receiptId)
-                .orElseGet(ReceiptOcrResultEntity::new);
-
+        ReceiptOcrResultEntity entity = new ReceiptOcrResultEntity();
         entity.setReceiptId(receiptId);
-        entity.setRawText(result.getRawText());
-        entity.setNormalizedJson(result.getNormalizedJson());
+        entity.setRawText(result.getRawText() == null ? "" : result.getRawText());
+
+        String normalizedJson = result.getNormalizedJson();
+        if (normalizedJson == null || normalizedJson.isBlank()) {
+            normalizedJson = "{}";
+        }
+
+        entity.setOcrJson(normalizedJson);
         entity.setProvider(ocrProvider.providerName());
         entity.setCreatedAt(OffsetDateTime.now());
 
         ocrRepo.save(entity);
 
-        log.info("[{}] OCR persisted receiptId={} rawTextLength={} jsonLength={}",
-                requestId,
-                receiptId,
-                entity.getRawText().length(),
-                entity.getNormalizedJson().length());
+        log.info("[{}] OCR persisted receiptId={} chars={}",
+                RequestCorrelation.getRequestId(), receiptId, entity.getRawText().length());
 
         itemRepo.deleteByReceiptId(receiptId);
 
-        List<ReceiptItemEntity> rawItems = extractItems(receiptId, entity.getRawText());
+        List<ReceiptItemEntity> items = extractItems(receiptId, entity.getRawText());
 
-        String layoutText = buildLayoutText(entity.getNormalizedJson());
+        items = categorize(items);
 
-        List<ReceiptItemEntity> layoutItems = extractItems(receiptId, layoutText);
+        itemRepo.saveAll(items);
 
-        List<ReceiptItemEntity> selected = selectBetterResult(rawItems, layoutItems);
-
-        selected = categorize(selected);
-
-        itemRepo.saveAll(selected);
-
-        log.info("[{}] Final OCR items selected receiptId={} items={}",
-                requestId, receiptId, selected.size());
+        log.info("[{}] Items extracted receiptId={} items={}",
+                RequestCorrelation.getRequestId(), receiptId, items.size());
 
         return result;
     }
 
-    private String buildLayoutText(String normalizedJson) {
-
-        String requestId = RequestCorrelation.getRequestId();
-
-        if (normalizedJson == null || normalizedJson.isBlank() || "{}".equals(normalizedJson.trim())) {
-            return "";
-        }
-
-        try {
-
-            OcrLayoutDocument document = azureOcrLayoutParser.parse(normalizedJson);
-
-            if (document == null || !document.hasPages()) {
-                return "";
-            }
-
-            List<OcrRow> rows = rowGrouper.groupDocument(document);
-
-            if (rows == null || rows.isEmpty()) {
-                return "";
-            }
-
-            String text = rowComposer.composeDocumentText(rows);
-
-            log.info("[{}] Layout reconstruction rows={} length={}",
-                    requestId, rows.size(), text.length());
-
-            return text;
-
-        } catch (Exception ex) {
-
-            log.warn("[{}] Layout parsing failed fallback rawText", requestId, ex);
-
-            return "";
-        }
+    public Optional<ReceiptOcrResultEntity> getOcrResult(UUID receiptId) {
+        return ocrRepo.findById(receiptId);
     }
 
-    private List<ReceiptItemEntity> extractItems(UUID receiptId, String text) {
+    public List<ReceiptItemEntity> getItems(UUID receiptId) {
+        return itemRepo.findByReceiptIdOrderByLineNoAsc(receiptId);
+    }
 
-        if (text == null || text.isBlank()) {
+    /**
+     * Step 4.3
+     * Extract only the ITEM TABLE section before parsing
+     */
+    private List<ReceiptItemEntity> extractItems(UUID receiptId, String rawText) {
+
+        if (rawText == null || rawText.isBlank()) {
             return List.of();
         }
 
-        List<ReceiptItemParser.ParsedItem> parsed = itemParser.parseReceipt(text);
+        log.info("[{}] OCR parsing receiptId={} textLength={}",
+                RequestCorrelation.getRequestId(), receiptId, rawText.length());
+
+        String filteredText = filterItemSection(rawText);
+
+        List<ReceiptItemParser.ParsedItem> parsedItems =
+                itemParser.parseReceipt(filteredText);
 
         List<ReceiptItemEntity> items = new ArrayList<>();
 
         int lineNo = 1;
 
-        for (ReceiptItemParser.ParsedItem p : parsed) {
+        for (ReceiptItemParser.ParsedItem parsed : parsedItems) {
 
-            if (p.getAmount() == null ||
-                    p.getAmount().compareTo(java.math.BigDecimal.ZERO) <= 0) {
+            if (parsed.getAmount() == null ||
+                    parsed.getAmount().compareTo(java.math.BigDecimal.ZERO) <= 0) {
                 continue;
             }
 
@@ -177,65 +133,84 @@ public class OcrService {
             item.setId(UUID.randomUUID());
             item.setReceiptId(receiptId);
             item.setLineNo(lineNo++);
-            item.setRawLine(p.getRawLine());
-            item.setItemName(p.getItemName());
-            item.setQuantity(p.getQuantity());
-            item.setUnitPrice(p.getUnitPrice());
-            item.setAmount(p.getAmount());
+            item.setRawLine(parsed.getRawLine());
+            item.setItemName(parsed.getItemName());
+            item.setQuantity(parsed.getQuantity());
+            item.setUnitPrice(parsed.getUnitPrice());
+            item.setAmount(parsed.getAmount());
             item.setCurrency("SGD");
             item.setCreatedAt(OffsetDateTime.now());
 
             items.add(item);
         }
 
+        log.info("[{}] Parsed items receiptId={} items={}",
+                RequestCorrelation.getRequestId(), receiptId, items.size());
+
         return items;
     }
 
-    private List<ReceiptItemEntity> selectBetterResult(
-            List<ReceiptItemEntity> raw,
-            List<ReceiptItemEntity> layout) {
+    /**
+     * Extract the actual ITEM TABLE area from OCR text
+     */
+    private String filterItemSection(String rawText) {
 
-        String requestId = RequestCorrelation.getRequestId();
+        String[] lines = rawText.split("\\r?\\n");
 
-        int rawScore = score(raw);
-        int layoutScore = score(layout);
+        List<String> result = new ArrayList<>();
 
-        log.info("[{}] OCR scoring rawScore={} layoutScore={}",
-                requestId, rawScore, layoutScore);
+        boolean inItems = false;
 
-        if (layoutScore > rawScore) {
-            log.info("[{}] Layout parsing selected", requestId);
-            return layout;
+        for (String line : lines) {
+
+            String l = line.trim();
+
+            if (l.isEmpty()) {
+                continue;
+            }
+
+            String upper = l.toUpperCase();
+
+            /* Detect start of item section */
+            if (upper.contains("ITEM NAME") ||
+                    upper.equals("ITEM") ||
+                    upper.equals("NAME/ITEMNO")) {
+
+                inItems = true;
+                continue;
+            }
+
+            /* Stop when totals section begins */
+            if (upper.contains("TOTAL") ||
+                    upper.contains("GST") ||
+                    upper.contains("CARD") ||
+                    upper.contains("PAYMENT") ||
+                    upper.contains("APPROVAL") ||
+                    upper.contains("BATCH") ||
+                    upper.contains("REF:") ||
+                    upper.contains("TRAN TIME")) {
+
+                break;
+            }
+
+            if (!inItems) {
+                continue;
+            }
+
+            /* Remove barcodes */
+            if (BARCODE_PATTERN.matcher(l).matches()) {
+                continue;
+            }
+
+            /* Remove discount rows */
+            if (l.startsWith("-$") || l.contains("DISCOUNT")) {
+                continue;
+            }
+
+            result.add(l);
         }
 
-        log.info("[{}] Raw text parsing selected", requestId);
-        return raw;
-    }
-
-    private int score(List<ReceiptItemEntity> items) {
-
-        if (items == null) return 0;
-
-        int score = 0;
-
-        for (ReceiptItemEntity i : items) {
-
-            if (i.getAmount() != null &&
-                    i.getAmount().compareTo(java.math.BigDecimal.ZERO) > 0) {
-                score += 3;
-            }
-
-            if (i.getItemName() != null &&
-                    i.getItemName().length() > 2) {
-                score += 1;
-            }
-
-            if (i.getQuantity() != null) {
-                score += 1;
-            }
-        }
-
-        return score;
+        return String.join("\n", result);
     }
 
     private List<ReceiptItemEntity> categorize(List<ReceiptItemEntity> items) {
@@ -252,7 +227,6 @@ public class OcrService {
             );
 
             item.setCategory(r.getCategory());
-
             item.setConfidence(
                     r.getConfidence()
                             .setScale(2, java.math.RoundingMode.HALF_UP)
@@ -260,13 +234,5 @@ public class OcrService {
         }
 
         return items;
-    }
-
-    public Optional<ReceiptOcrResultEntity> getOcrResult(UUID receiptId) {
-        return ocrRepo.findById(receiptId);
-    }
-
-    public List<ReceiptItemEntity> getItems(UUID receiptId) {
-        return itemRepo.findByReceiptIdOrderByLineNoAsc(receiptId);
     }
 }
