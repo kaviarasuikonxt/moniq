@@ -1,5 +1,5 @@
 // ui/src/api.js
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8888").replace(/\/+$/, ""); // Remove trailing slashes
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8888").replace(/\/+$/, "");
 
 let accessToken = localStorage.getItem("accessToken") || "";
 
@@ -82,6 +82,12 @@ export async function getReceiptItems(id) {
 
 export async function getReceiptOcr(id) {
   return request(`/api/receipts/${id}/ocr`, {
+    method: "GET",
+  });
+}
+
+export async function getReceiptSummary(id) {
+  return request(`/api/receipts/${id}/summary`, {
     method: "GET",
   });
 }

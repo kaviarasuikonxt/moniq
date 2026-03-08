@@ -5,6 +5,7 @@ import {
   getReceipt,
   getReceiptItems,
   getReceiptOcr,
+  getReceiptSummary,
   listReceipts,
   loginV2,
   setAccessToken,
@@ -35,6 +36,7 @@ function App() {
   const [selectedReceipt, setSelectedReceipt] = useState(null);
   const [receiptItems, setReceiptItems] = useState(null);
   const [receiptOcr, setReceiptOcr] = useState(null);
+  const [receiptSummary, setReceiptSummary] = useState(null);
 
   const [uploadFile, setUploadFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -46,6 +48,7 @@ function App() {
   const [info, setInfo] = useState("");
 
   const selectedStatus = selectedReceipt?.status || receiptItems?.status || "";
+  const summaryCategories = receiptSummary?.categories || [];
 
   async function handleLogin(e) {
     e.preventDefault();
@@ -71,6 +74,7 @@ function App() {
     setSelectedReceipt(null);
     setReceiptItems(null);
     setReceiptOcr(null);
+    setReceiptSummary(null);
     setError("");
     setInfo("Logged out.");
   }
@@ -106,11 +110,24 @@ function App() {
       setSelectedReceipt(receipt);
       setReceiptItems(items);
 
-      try {
-        const ocr = await getReceiptOcr(receiptId);
-        setReceiptOcr(ocr);
-      } catch {
+      const completed =
+        receipt?.status === "OCR_COMPLETED" || receipt?.status === "COMPLETED";
+
+      if (completed) {
+        try {
+          const [ocr, summary] = await Promise.all([
+            getReceiptOcr(receiptId),
+            getReceiptSummary(receiptId),
+          ]);
+          setReceiptOcr(ocr);
+          setReceiptSummary(summary);
+        } catch {
+          setReceiptOcr(null);
+          setReceiptSummary(null);
+        }
+      } else {
         setReceiptOcr(null);
+        setReceiptSummary(null);
       }
     } catch (err) {
       setError(err.message || "Failed to load receipt detail");
@@ -192,7 +209,7 @@ function App() {
         <header className="hero">
           <div>
             <h1>MoniQ Receipt OCR</h1>
-            <p>Upload receipts, track OCR status, and review extracted items.</p>
+            <p>Upload receipts, track OCR status, review extracted items, and view category summary.</p>
           </div>
           {loggedIn && (
             <button className="secondary-btn" onClick={handleLogout}>
@@ -266,17 +283,13 @@ function App() {
                     {orderedReceipts.map((r) => (
                       <button
                         key={r.id}
-                        className={`receipt-row ${
-                          selectedReceiptId === r.id ? "selected" : ""
-                        }`}
+                        className={`receipt-row ${selectedReceiptId === r.id ? "selected" : ""}`}
                         onClick={() => setSelectedReceiptId(r.id)}
                       >
                         <div className="receipt-row-main">
                           <div className="receipt-title">{r.fileName || r.id}</div>
                           <div className="receipt-subtitle">
-                            {r.createdAt
-                              ? new Date(r.createdAt).toLocaleString()
-                              : "No date"}
+                            {r.createdAt ? new Date(r.createdAt).toLocaleString() : "No date"}
                           </div>
                         </div>
                         <StatusBadge status={r.status} />
@@ -325,11 +338,7 @@ function App() {
 
                     {selectedReceipt.fileUrl && (
                       <div className="preview-link">
-                        <a
-                          href={selectedReceipt.fileUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
+                        <a href={selectedReceipt.fileUrl} target="_blank" rel="noreferrer">
                           Open uploaded receipt
                         </a>
                       </div>
@@ -342,10 +351,29 @@ function App() {
                     )}
 
                     {selectedStatus === "FAILED" && (
-                      <div className="alert error">
-                        OCR failed for this receipt.
-                      </div>
+                      <div className="alert error">OCR failed for this receipt.</div>
                     )}
+
+                    <div className="subsection">
+                      <h3>Category Summary</h3>
+                      {selectedStatus !== "OCR_COMPLETED" && selectedStatus !== "COMPLETED" ? (
+                        <p className="muted">Summary will appear after OCR is completed.</p>
+                      ) : summaryCategories.length === 0 ? (
+                        <p className="muted">No summary available yet.</p>
+                      ) : (
+                        <div className="summary-list">
+                          {summaryCategories.map((row, index) => (
+                            <div key={`${row.category}-${index}`} className="summary-row">
+                              <div className="summary-category">{row.category}</div>
+                              <div className="summary-items">{row.items} items</div>
+                              <div className="summary-amount">
+                                SGD {Number(row.totalAmount || 0).toFixed(2)}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
 
                     <div className="subsection">
                       <h3>Extracted Items</h3>
@@ -358,6 +386,7 @@ function App() {
                               <tr>
                                 <th>Line</th>
                                 <th>Item</th>
+                                <th>Qty</th>
                                 <th>Amount</th>
                                 <th>Category</th>
                                 <th>Confidence</th>
@@ -368,9 +397,10 @@ function App() {
                                 <tr key={item.id}>
                                   <td>{item.lineNo}</td>
                                   <td>{item.itemName || item.rawLine}</td>
+                                  <td>{item.quantity ?? "-"}</td>
                                   <td>
                                     {item.amount != null
-                                      ? `${item.currency || "SGD"} ${item.amount}`
+                                      ? `${item.currency || "SGD"} ${Number(item.amount).toFixed(2)}`
                                       : "-"}
                                   </td>
                                   <td>{item.category || "-"}</td>

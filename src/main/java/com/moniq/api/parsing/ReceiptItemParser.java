@@ -7,6 +7,7 @@ import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Service
@@ -16,12 +17,22 @@ public class ReceiptItemParser {
     private static final Pattern ITEM_CODE_PATTERN = Pattern.compile("^\\d{1,8}$");
     private static final Pattern ALPHA_PATTERN = Pattern.compile(".*[A-Za-z].*");
 
+    // Single-line table format:
+    // ITEM NAME    QTY    PRICE    TOTAL
+    // Example:
+    // Roti Boy Bun eac 1 1.70 1.70
+    private static final Pattern SINGLE_LINE_ITEM_PATTERN =
+            Pattern.compile("^(.+?)\\s+(\\d+(?:\\.\\d{1,3})?)\\s+(\\d+(?:\\.\\d{1,2})?)\\s+(\\d+(?:\\.\\d{1,2})?)$");
+
     private static final List<String> NOISE_WORDS = List.of(
             "u stars", "branch", "cashier", "saleman", "name/itemno", "price", "qty",
             "total", "number", "originalamount", "discountamount", "specialamount",
             "gst", "pay", "remark", "feedback", "store", "member", "loyalty",
             "visa", "mastercard", "cash", "change", "receipt", "reg no",
-            "sent to", "singapore", "link", "default"
+            "sent to", "singapore", "link", "default",
+            "slip", "termi", "staff no", "comments", "item name", "net amt",
+            "inc gst", "business reg", "merchant id", "terminal id", "trans date/time",
+            "transaction amount", "goods solds are not returnable", "thank you"
     );
 
     public ParsedItem parse(String line) {
@@ -34,6 +45,13 @@ public class ReceiptItemParser {
             return null;
         }
 
+        // 1) First try single-line table parser
+        ParsedItem singleLine = parseSingleLineItem(raw, line);
+        if (singleLine != null) {
+            return singleLine;
+        }
+
+        // 2) Fallback to old single-line amount-at-end logic
         String[] parts = raw.split("\\s+");
         if (parts.length < 2) {
             return null;
@@ -85,6 +103,14 @@ public class ReceiptItemParser {
         for (int i = 0; i < lines.size(); i++) {
             String line = lines.get(i);
 
+            // 1) First try direct single-line item parsing
+            ParsedItem singleLine = parseSingleLineItem(line, line);
+            if (singleLine != null) {
+                items.add(singleLine);
+                continue;
+            }
+
+            // 2) Then try multi-line item parsing
             if (!looksLikeItemName(line)) {
                 continue;
             }
@@ -116,6 +142,35 @@ public class ReceiptItemParser {
         return items;
     }
 
+    private ParsedItem parseSingleLineItem(String cleanedLine, String rawLine) {
+        Matcher matcher = SINGLE_LINE_ITEM_PATTERN.matcher(cleanedLine);
+        if (!matcher.matches()) {
+            return null;
+        }
+
+        String possibleName = matcher.group(1);
+        BigDecimal qty = tryParseQuantity(matcher.group(2));
+        BigDecimal unitPrice = tryParseAmount(matcher.group(3));
+        BigDecimal total = tryParseAmount(matcher.group(4));
+
+        if (qty == null || unitPrice == null || total == null) {
+            return null;
+        }
+
+        String itemName = normalizeItemName(possibleName);
+        if (itemName.isBlank() || isNoise(itemName)) {
+            return null;
+        }
+
+        ParsedItem item = new ParsedItem();
+        item.setRawLine(rawLine);
+        item.setItemName(itemName);
+        item.setQuantity(qty.setScale(3, RoundingMode.HALF_UP));
+        item.setUnitPrice(unitPrice.setScale(2, RoundingMode.HALF_UP));
+        item.setAmount(total.setScale(2, RoundingMode.HALF_UP));
+        return item;
+    }
+
     private ScanResult scanForward(List<String> lines, int start) {
         BigDecimal unitPrice = null;
         BigDecimal quantity = null;
@@ -128,6 +183,11 @@ public class ReceiptItemParser {
 
             if (cleaned.isBlank()) {
                 continue;
+            }
+
+            // if next line itself is a single-line item, stop current multiline scan
+            if (parseSingleLineItem(cleaned, cleaned) != null) {
+                break;
             }
 
             if (looksLikeItemName(cleaned)) {
@@ -247,12 +307,15 @@ public class ReceiptItemParser {
     private boolean isStopSection(String line) {
         String v = line.toLowerCase(Locale.ROOT);
         return v.contains("qty:")
+                || v.contains("subtotal")
                 || v.contains("originalamount")
                 || v.contains("discountamount")
                 || v.contains("specialamount")
                 || v.contains("gst")
                 || v.contains("pay:")
-                || v.contains("remark");
+                || v.contains("nets")
+                || v.contains("remark")
+                || v.contains("total $");
     }
 
     private boolean looksLikeItemName(String line) {
