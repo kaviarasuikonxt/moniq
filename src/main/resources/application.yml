@@ -97,3 +97,21 @@ moniq:
       ustar:
         multiline: true
         pattern: PRICE_QTY_TOTAL
+
+  categorization:
+    enabled: true
+    keywords:
+      groceries:
+        dairy: [ milk, yoghurt, cheese, butter ]
+        bakery: [ bun, bread, croissant, roti, loaf ]
+        fruits: [ banana, apple, orange, guava ]
+        vegetables: [ spinach, kailan, carrot, tomato ]
+      food_beverage:
+        drinks: [ coffee, tea, coke, sprite, juice ]
+        hawker: [ nasi, mee, kopi, teh ]
+      transport:
+        fuel: [ petrol, diesel, ron95, ron97 ]
+      health:
+        medicine: [ panadol, vitamin, mask ]
+      retail:
+        household: [ detergent, tissue, soap ]

@@ -17,7 +17,25 @@ public class ReceiptItemResponse {
     public String currency;
       public String category;
     public BigDecimal confidence;
+    public String subcategory;
+    public String categorySource;
 
+
+    public String getSubcategory() {
+        return subcategory;
+    }
+
+    public void setSubcategory(String subcategory) {
+        this.subcategory = subcategory;
+    }
+
+    public String getCategorySource() {
+        return categorySource;
+    }
+
+    public void setCategorySource(String categorySource) {
+        this.categorySource = categorySource;
+    }
 
     public ReceiptItemResponse() {
     }

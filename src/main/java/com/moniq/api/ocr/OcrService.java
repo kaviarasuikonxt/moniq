@@ -263,31 +263,33 @@ public class OcrService {
         return items;
     }
 
-    private List<ReceiptItemEntity> categorize(List<ReceiptItemEntity> items) {
-        if (items.isEmpty()) {
-            log.warn("[{}] Categorization skipped reason=no_items",
-                    RequestCorrelation.getRequestId());
-            return items;
-        }
-
-        for (ReceiptItemEntity item : items) {
-            CategorizationResult r = categorizer.categorize(
-                    item.getItemName(),
-                    item.getRawLine()
-            );
-
-            item.setCategory(r.getCategory());
-            item.setConfidence(
-                    r.getConfidence().setScale(2, java.math.RoundingMode.HALF_UP)
-            );
-        }
-
-        log.info("[{}] Categorization completed items={}",
-                RequestCorrelation.getRequestId(),
-                items.size());
-
+  private List<ReceiptItemEntity> categorize(List<ReceiptItemEntity> items) {
+    if (items.isEmpty()) {
+        log.warn("[{}] Categorization skipped reason=no_items",
+                RequestCorrelation.getRequestId());
         return items;
     }
+
+    for (ReceiptItemEntity item : items) {
+        CategorizationResult r = categorizer.categorize(
+                item.getItemName(),
+                item.getRawLine()
+        );
+
+        item.setCategory(r.getCategory());
+        item.setSubcategory(r.getSubcategory());
+        item.setConfidence(
+                r.getConfidence().setScale(2, java.math.RoundingMode.HALF_UP)
+        );
+        item.setCategorySource(r.getSource());
+    }
+
+    log.info("[{}] Categorization completed items={}",
+            RequestCorrelation.getRequestId(),
+            items.size());
+
+    return items;
+}
 
     private String safeContentType(String contentType) {
         if (contentType == null || contentType.isBlank()) {

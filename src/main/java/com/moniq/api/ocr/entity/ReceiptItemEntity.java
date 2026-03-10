@@ -45,6 +45,26 @@ public class ReceiptItemEntity {
     @Column(name = "category", length = 64)
     private String category;
 
+    public String getSubcategory() {
+        return subcategory;
+    }
+
+    public void setSubcategory(String subcategory) {
+        this.subcategory = subcategory;
+    }
+
+    public String getCategorySource() {
+        return categorySource;
+    }
+
+    public void setCategorySource(String categorySource) {
+        this.categorySource = categorySource;
+    }
+    @Column(name = "subcategory", length = 64)
+    private String subcategory;
+
+    @Column(name = "category_source", length = 32)
+    private String categorySource;
     /**
      * Stored as 0.00 - 1.00, but persisted as NUMERIC(5,2).
      */
